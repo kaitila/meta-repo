@@ -4,6 +4,7 @@
 import type { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { gitPolicy, isProtected, mayTouchProtected, type Policy } from "./policy";
 import { dbPath, openDb, repoRoot } from "./store";
 
 export type Risk = "auto" | "review" | "human";
@@ -79,12 +80,13 @@ export class ForemanError extends Error {
 export const DEFAULT_LEASE_MINUTES = 30;
 
 /**
- * Who is calling. FOREMAN_ACTOR names them; anything running inside Claude Code
- * (CLAUDECODE=1) or with FOREMAN_AGENT=1 is an agent. This is a guardrail, not a
- * boundary: the hard limits live outside the agent (D0003).
+ * Who is calling. FOREMAN_ACTOR names them. A command Claude Code runs for the model
+ * (CLAUDE_CODE_CHILD_SESSION=1), or anything with FOREMAN_AGENT=1, is an agent.
+ * Not CLAUDECODE=1: Claude Code also sets that in IDE terminals, where a person types.
+ * This is a guardrail, not a boundary: the hard limits live outside the agent (D0003).
  */
 export function actorFromEnv(env = process.env): Actor {
-  const agent = env.CLAUDECODE === "1" || env.FOREMAN_AGENT === "1";
+  const agent = env.CLAUDE_CODE_CHILD_SESSION === "1" || env.FOREMAN_AGENT === "1";
   const name = env.FOREMAN_ACTOR || (agent ? `agent-${process.pid}` : env.USER || "human");
   return { name, kind: agent ? "agent" : "human" };
 }
@@ -150,10 +152,17 @@ export class Foreman {
     public db: Database,
     public root: string | null = null, // repo root, for reserving numbers from files
     private now: () => number = Date.now,
+    public policy: Policy = gitPolicy(root),
   ) {}
 
   static open(cwd = process.cwd()): Foreman {
-    return new Foreman(openDb(dbPath(cwd)), repoRoot(cwd));
+    const root = repoRoot(cwd);
+    return new Foreman(openDb(dbPath(cwd)), root, Date.now, gitPolicy(root));
+  }
+
+  /** Default risk for a new task: "review" if its declared paths may touch protected ones (D0008). */
+  defaultRisk(paths: string[]): Risk {
+    return mayTouchProtected(paths, this.policy.protectedPaths) ? "review" : "auto";
   }
 
   // ---- reading ----
@@ -237,6 +246,7 @@ export class Foreman {
 
   create(input: CreateInput, actor: Actor): Task {
     if (!input.title.trim()) throw new ForemanError("invalid", "a task needs a title");
+    const risk = input.risk ?? this.defaultRisk(input.paths ?? []);
     return this.tx(() => {
       for (const ref of [input.parent, input.discoveredFrom, ...(input.blockedBy ?? [])]) {
         if (ref) this.get(ref);
@@ -260,7 +270,7 @@ export class Foreman {
           input.spec ?? "",
           JSON.stringify(acceptance),
           JSON.stringify(input.paths ?? []),
-          input.risk ?? "review",
+          risk,
           "draft",
           input.parent ?? null,
           JSON.stringify(input.blockedBy ?? []),
@@ -269,7 +279,7 @@ export class Foreman {
           at,
           at,
         );
-      this.event(id, actor, "created", { title: input.title, risk: input.risk ?? "review" });
+      this.event(id, actor, "created", { title: input.title, risk, riskFrom: input.risk ? "given" : "paths" });
       // "ready" goes through the same rules as markReady (it needs a check).
       return input.ready ? this.markReady(id, actor) : this.get(id);
     });
@@ -392,6 +402,11 @@ export class Foreman {
    * with the results, so the next worker sees what's missing.
    */
   recordVerify(id: string, actor: Actor, results: CheckResult[]): Task {
+    // Outside the transaction: it runs git. The branch can't change under us in a way
+    // that matters, because escalation only ever adds a person.
+    const before = this.get(id);
+    const branch = before.branch;
+    const changed = before.risk === "auto" ? this.policy.changedFiles({ branch, pr: before.pr }) : [];
     return this.tx(() => {
       const t = this.get(id);
       this.expect(t, ["verifying"], "record a verdict on");
@@ -406,9 +421,20 @@ export class Foreman {
         throw new ForemanError("invalid", `unknown checks: ${unknown.map((r) => r.check).join(", ")}`);
       }
       const pass = results.every((r) => r.pass);
-      const next: Status = !pass ? "ready" : t.risk === "auto" ? "approved" : "needs_approval";
+      let next: Status = !pass ? "ready" : t.risk === "auto" ? "approved" : "needs_approval";
       this.set(id, { status: next, assignee: null, lease_until: null });
       this.event(id, actor, pass ? "verified" : "verify_failed", { results });
+      if (next === "approved") {
+        // The real diff decides (D0008): a protected file, or a diff we can't see, needs a person.
+        // An empty diff is as good as none: nothing to approve automatically.
+        const seen = changed && changed.length ? changed : null;
+        const hit = seen === null ? null : seen.filter((f) => isProtected(f, this.policy.protectedPaths));
+        if (hit === null || hit.length) {
+          next = "needs_approval";
+          this.set(id, { status: next });
+          this.event(id, actor, "escalated", hit === null ? { reason: "couldn't see the PR's changes (none found)", branch, pr: before.pr } : { reason: "changes protected paths", files: hit });
+        }
+      }
       return this.get(id);
     });
   }
