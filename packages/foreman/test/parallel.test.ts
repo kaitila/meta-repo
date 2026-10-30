@@ -1,6 +1,6 @@
 // Real processes, real git worktrees: the case that broke other trackers (R5.1).
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dbPath } from "../src/store";
@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), "foreman-test-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 function sh(cmd: string[], cwd: string, env: Record<string, string> = {}) {
-  const p = Bun.spawnSync(cmd, { cwd, env: { ...process.env, CLAUDECODE: "", FOREMAN_DB: "", ...env }, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawnSync(cmd, { cwd, env: { ...process.env, CLAUDECODE: "", CLAUDE_CODE_CHILD_SESSION: "", FOREMAN_AGENT: "", FOREMAN_DB: "", ...env }, stdout: "pipe", stderr: "pipe" });
   return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
 }
 
@@ -44,7 +44,7 @@ test("8 agents in 8 worktrees race for 3 tasks: exactly 3 claims win, all persis
     wts.map(async (wt, i) => {
       const p = Bun.spawn(["bun", CLI, "claim", "--json"], {
         cwd: wt,
-        env: { ...process.env, FOREMAN_DB: "", CLAUDECODE: "1", FOREMAN_ACTOR: `agent-${i}` },
+        env: { ...process.env, FOREMAN_DB: "", CLAUDE_CODE_CHILD_SESSION: "1", FOREMAN_ACTOR: `agent-${i}` },
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -63,9 +63,13 @@ test("8 agents in 8 worktrees race for 3 tasks: exactly 3 claims win, all persis
 test("approve is refused inside an agent session and without a terminal", () => {
   const root = repo();
   sh(["bun", CLI, "add", "x", "--check", "cmd: true"], root);
-  const r = sh(["bun", CLI, "approve", "T-0001"], root, { CLAUDECODE: "1" });
-  expect(r.code).toBe(1);
-  expect(r.err).toContain("foreman:");
+  const agent = sh(["bun", CLI, "approve", "T-0001"], root, { CLAUDE_CODE_CHILD_SESSION: "1" });
+  expect(agent.code).toBe(1);
+  expect(agent.err).toContain("agent session");
+  // An IDE terminal has CLAUDECODE=1 but is a person: refused only for lacking a TTY here.
+  const ide = sh(["bun", CLI, "approve", "T-0001"], root, { CLAUDECODE: "1" });
+  expect(ide.code).toBe(1);
+  expect(ide.err).toContain("interactive terminal");
 });
 
 test("reserve decision skips numbers already on disk", () => {
@@ -74,4 +78,31 @@ test("reserve decision skips numbers already on disk", () => {
   sh(["touch", "docs/decisions/D0007-something.md"], root);
   expect(sh(["bun", CLI, "reserve", "decision"], root).out.trim()).toBe("D0008");
   expect(sh(["bun", CLI, "reserve", "decision"], root).out.trim()).toBe("D0009");
+});
+
+test("real git: a branch that changes a protected file is escalated; an unprotected one is approved (D0008)", async () => {
+  const { Foreman } = await import("../src/core");
+  const root = repo();
+  const g = (args: string[]) => sh(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], root);
+  const human = { name: "ada", kind: "human" as const };
+  const run = (branch: string, file: string) => {
+    g(["switch", "-q", "-c", branch, "main"]);
+    sh(["mkdir", "-p", file.split("/").slice(0, -1).join("/") || "."], root);
+    writeFileSync(join(root, file), "x\n");
+    g(["add", "-A"]);
+    g(["commit", "-qm", branch]);
+    g(["switch", "-q", "main"]);
+    const f = Foreman.open(root);
+    const t = f.create({ title: branch, acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    const w = { name: `w-${branch}`, kind: "agent" as const };
+    f.claim(t.id, w);
+    f.progress(t.id, w, { branch });
+    f.submit(t.id, w, { pr: "#1" });
+    const v = { name: `v-${branch}`, kind: "agent" as const };
+    f.startVerify(t.id, v);
+    return f.recordVerify(t.id, v, [{ check: "c1", pass: true, evidence: "ok" }]).status;
+  };
+  sh(["git", "branch", "-m", "main"], root);
+  expect(run("plain", "src/a.ts")).toBe("approved");
+  expect(run("sneaky", ".github/workflows/ci.yml")).toBe("needs_approval");
 });

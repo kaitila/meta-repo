@@ -37,7 +37,7 @@ Verifying (anyone who didn't work on it)
   verdict <id> --result 'c1:pass:evidence' ...   or  --results-json file|-
 
 Signing off
-  approve <id> [--note text]    people only
+  approve [id...] [--note text] people only; no id = everything waiting, after one yes
   merged <id> [--pr url]
 
 Housekeeping
@@ -46,8 +46,15 @@ Housekeeping
   export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
   mcp                           run the MCP server on stdio
 
-Who you are: FOREMAN_ACTOR names you; CLAUDECODE=1 or FOREMAN_AGENT=1 marks you as an agent.
+Who you are: FOREMAN_ACTOR names you; CLAUDE_CODE_CHILD_SESSION=1 (a command Claude Code runs) or
+FOREMAN_AGENT=1 marks you as an agent.
+Risk: --risk is optional; by default a task is auto unless its paths touch foreman.json's protectedPaths.
 State: <main checkout>/.foreman/foreman.db, or FOREMAN_DB.`;
+
+async function readLine(): Promise<string> {
+  for await (const chunk of console) return String(chunk);
+  return "";
+}
 
 function line(t: Task): string {
   const who = t.assignee ? ` @${t.assignee}` : "";
@@ -170,10 +177,21 @@ export async function main(argv: string[]): Promise<number | null> {
       return one(f.recordVerify(need(0, "task id"), me, results)), 0;
     }
     case "approve": {
+      if (me.kind !== "human") throw new ForemanError("human_only", "only a person can approve (this looks like an agent session)");
       if (!process.stdin.isTTY) {
         throw new ForemanError("human_only", "approve runs only in an interactive terminal");
       }
-      return one(f.approve(need(0, "task id"), me, o.note)), 0;
+      // No ids: everything waiting for a person, after one look and one yes.
+      const ids = args.length ? args : f.list({ status: ["needs_approval"] }).map((t) => t.id);
+      if (!ids.length) return out([], "nothing is waiting for approval"), 0;
+      if (!args.length) {
+        console.log(`Waiting for you:\n${ids.map((i) => line(f.get(i))).join("\n")}`);
+        process.stdout.write(`Approve all ${ids.length}? [y/N] `);
+        const answer = (await readLine()).trim().toLowerCase();
+        if (answer !== "y" && answer !== "yes") return out([], "nothing approved"), 0;
+      }
+      const done = ids.map((i) => f.approve(i, me, o.note));
+      return out(done, done.map(line).join("\n")), 0;
     }
     case "merged":
       return one(f.merged(need(0, "task id"), me, o.pr)), 0;

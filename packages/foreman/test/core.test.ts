@@ -1,15 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { type Actor, Foreman, ForemanError } from "../src/core";
 import { toMarkdown } from "../src/export";
+import type { Policy } from "../src/policy";
+import { DEFAULT_PROTECTED } from "../src/policy";
 import { openDb } from "../src/store";
 
 const human: Actor = { name: "ada", kind: "human" };
 const worker: Actor = { name: "worker-1", kind: "agent" };
 const verifier: Actor = { name: "verifier-1", kind: "agent" };
 
-function setup() {
+function setup(changed: string[] | null = ["src/feature.ts"]) {
   let clock = 1_000_000;
-  const f = new Foreman(openDb(":memory:"), null, () => clock);
+  const policy: Policy = { protectedPaths: DEFAULT_PROTECTED, changedFiles: () => changed };
+  const f = new Foreman(openDb(":memory:"), null, () => clock, policy);
   return { f, tick: (ms: number) => (clock += ms) };
 }
 
@@ -190,4 +193,45 @@ describe("leases", () => {
 test("reserve hands out each number once", () => {
   const { f } = setup();
   expect([f.reserve("migration", worker), f.reserve("migration", verifier), f.reserve("decision", worker)]).toEqual([1, 2, 1]);
+});
+
+describe("risk from paths (D0008)", () => {
+  const passVerify = (f: Foreman, id: string) => {
+    f.claim(id, worker);
+    f.progress(id, worker, { branch: "b" });
+    f.submit(id, worker, { pr: "#1" });
+    f.startVerify(id, verifier);
+    return f.recordVerify(id, verifier, f.get(id).acceptance.map((c) => ({ check: c.id, pass: true, evidence: "ok" })));
+  };
+
+  test("default risk: auto, unless the declared paths may touch protected ones", () => {
+    const { f } = setup();
+    expect(f.create({ title: "a", paths: ["src/**"] }, human).risk).toBe("auto");
+    expect(f.create({ title: "b" }, human).risk).toBe("auto");
+    expect(f.create({ title: "c", paths: [".github/workflows/ci.yml"] }, human).risk).toBe("review");
+    expect(f.create({ title: "d", paths: ["packages/x/.claude/**"] }, human).risk).toBe("review");
+    expect(f.create({ title: "e", paths: ["**"] }, human).risk).toBe("review");
+    expect(f.create({ title: "f", paths: ["src/**"], risk: "review" }, human).risk).toBe("review"); // given wins
+  });
+
+  test("auto + only unprotected files changed: approved", () => {
+    const { f } = setup(["src/a.ts", "docs/x.md"]);
+    const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    expect(passVerify(f, t.id).status).toBe("approved");
+  });
+
+  test("auto, but the branch really changed a protected file: escalated to a person", () => {
+    const { f } = setup(["src/a.ts", ".claude/settings.json"]);
+    const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    expect(passVerify(f, t.id).status).toBe("needs_approval");
+    const ev = f.events(t.id).find((e) => e.type === "escalated");
+    expect(ev?.data.files).toEqual([".claude/settings.json"]);
+  });
+
+  test("auto, but the diff can't be seen: escalated (fail closed)", () => {
+    const { f } = setup(null);
+    const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    expect(passVerify(f, t.id).status).toBe("needs_approval");
+    expect(f.events(t.id).find((e) => e.type === "escalated")?.data.reason).toContain("couldn't see");
+  });
 });

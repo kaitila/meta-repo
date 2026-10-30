@@ -1,0 +1,14 @@
+{
+  "$comment": "Paths whose changes need a person's approval even after a verifier passes them (D0008). Everything else merges on a passing verdict.",
+  "protectedPaths": [
+    ".claude/**",
+    "**/.claude/**",
+    ".github/**",
+    ".mcp.json",
+    ".gitleaks.toml",
+    "renovate.json",
+    "foreman.json",
+    "packages/foreman/src/**",
+    "packages/agent-kit/templates/**"
+  ]
+}

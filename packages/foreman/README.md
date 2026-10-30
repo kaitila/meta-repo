@@ -10,10 +10,12 @@ Status: MVP (step M3). The dispatcher, the verifier launcher, the janitor and th
 - **Every change** is one transaction plus an event in an append-only log.
 - **Claims are atomic and expire.** A worker keeps a claim alive with `heartbeat` or `progress`, and an expired claim goes back to `ready`.
 - **Verification:** the worker submits a PR and lets go. Someone who didn't work on the task verifies it, recording one result per acceptance check.
-- **Sign-off:**
+- **Sign-off** ([D0008](../../docs/decisions/D0008-risk-from-paths.md)):
   - `auto` tasks are approved once every check passes.
   - `review` tasks also need a person's `approve`.
   - `human` tasks are claimed and finished only by people.
+  - **Default risk:** a task is `auto` unless its declared paths touch the `protectedPaths` in `foreman.json` (guardrails, CI, foreman itself).
+  - **The diff decides:** when an `auto` task passes, foreman diffs its branch against main. If any protected file changed, or the diff can't be seen, the task goes to a person instead.
 - **Exporting:** `export` writes a task as markdown (spec, checks, verdict, history) for the PR that delivers it.
 
 ```
@@ -35,7 +37,8 @@ foreman progress T-0001 --branch t-0001 --note "filter wired"
 foreman submit T-0001 --pr https://github.com/me/repo/pull/12 --summary "..."
 FOREMAN_ACTOR=verifier-1 foreman verify T-0001
 FOREMAN_ACTOR=verifier-1 foreman verdict T-0001 --result "c1:pass:bun test 40 pass" --result "c2:pass:seen on /investors"
-foreman approve T-0001             # people only, in a terminal
+foreman approve                    # people only, in a terminal: everything waiting, after one yes
+foreman approve T-0001 T-0002      # or just these
 foreman merged T-0001
 foreman reserve decision           # next free Dnnnn, so parallel PRs never clash
 foreman export T-0001              # docs/tasks/T-0001.md
@@ -50,4 +53,4 @@ Every command takes `--json`.
   { "mcpServers": { "foreman": { "type": "stdio", "command": "bun", "args": ["packages/foreman/src/cli.ts", "mcp"] } } }
   ```
 - **MCP tools:** `list_tasks`, `next_tasks`, `show_task`, `create_task`, `claim_task`, `heartbeat`, `report_progress`, `submit_task`, `start_verify`, `record_verdict`, `mark_merged`, `reserve_number`. There is no approve tool.
-- **Identity:** `FOREMAN_ACTOR` names the caller. Anything running inside Claude Code counts as an agent. This is a guardrail, not a security boundary: branch protection and the verifier are the hard limits.
+- **Identity:** `FOREMAN_ACTOR` names the caller. A command Claude Code runs for the model (`CLAUDE_CODE_CHILD_SESSION=1`) counts as an agent. IDE terminals don't, even though Claude Code sets `CLAUDECODE=1` there. This is a guardrail, not a security boundary: branch protection and the verifier are the hard limits.
