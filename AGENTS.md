@@ -16,6 +16,7 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 
 ## Tasks
 Work on this repo is tracked in foreman itself (MCP server `foreman` in `.mcp.json`, or `bun packages/foreman/src/cli.ts`).
+- Code tasks follow the `ship` skill (`.claude/skills/ship/`). A finished task is verified by a fresh session running the `verify` skill, never by the session that wrote it.
 - Before starting: `next_tasks`, then `claim_task`. Report with `report_progress`, hand in with `submit_task` and the PR.
 - Found other work on the way: `create_task` with `discoveredFrom`. Search `list_tasks` first.
 - Never verify your own task, and never approve: people sign off, and only on changes to protected paths (`foreman.json`, D0008). Record your branch with `report_progress` so foreman can diff it.

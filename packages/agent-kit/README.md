@@ -41,4 +41,17 @@ These rules are the first layer, not a security boundary: Claude Code's docs say
 
 Live check: `bun run live-test` runs real headless Claude sessions against both layers, about $0.06 with Haiku. The other layers are CI and branch protection on the server.
 
-**Coming:** the ship skill and test-writer, docs-writer and reviewer agents, wired to foreman (T-0006).
+**The ship flow, wired to foreman:**
+- **`templates/.claude/skills/ship/`, the worker side.** It covers claim → worktree → code → three parallel agents → gate → merge main → PR → `submit_task`.
+  - The worker never verifies or approves its own task.
+  - It takes numbers from `reserve_number`.
+  - Work found on the way becomes a new task with `discoveredFrom`.
+- **`templates/.claude/skills/verify/`, for a fresh session that didn't do the work.**
+  - It runs every `cmd` check itself and wants concrete evidence for each statement; a statement it can't confirm fails.
+  - It checks the changed files against the task's `paths`.
+  - It records one verdict per check, and lists weaknesses even when the checks pass.
+- **`templates/.claude/agents/`: `test-writer`, `docs-writer` and `reviewer`.**
+  - They split the work by path: only test-writer runs the tests, docs-writer only edits docs, and the reviewer is read-only (no edit tools).
+  - None of them touches foreman: the worker owns the task.
+
+The templates name no stack or layout. They read the project's commands from the "Commands" section of `AGENTS.md`, and a test keeps them free of project names, decision numbers and stack-specific commands.
