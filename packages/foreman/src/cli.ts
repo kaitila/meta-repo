@@ -223,11 +223,11 @@ if (import.meta.main) {
       if (code !== null) process.exit(code);
     })
     .catch((e) => {
-      if (e instanceof ForemanError) {
-        if (process.argv.includes("--json")) console.error(JSON.stringify({ error: e.code, message: e.message }));
-        else console.error(`foreman: ${e.message}`);
-        process.exit(1);
-      }
-      throw e;
+      if (process.env.FOREMAN_DEBUG) throw e;
+      const code = e instanceof ForemanError ? e.code : "error";
+      const message = e instanceof Error ? e.message : String(e);
+      if (process.argv.includes("--json")) console.error(JSON.stringify({ error: code, message }));
+      else console.error(`foreman: ${message}`);
+      process.exit(1);
     });
 }
