@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "description": "GitHub Actions: one grouped PR, digests kept pinned",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Bun and its types move together",
+      "matchPackageNames": ["@types/bun", "bun"],
+      "groupName": "bun"
+    },
+    {
+      "description": "Non-major dependency updates in one PR",
+      "matchManagers": ["bun"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dependencies (non-major)"
+    }
+  ]
+}
