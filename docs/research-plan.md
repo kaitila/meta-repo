@@ -88,7 +88,7 @@ meta-repo/                          (MIT, public)
 |---|---|---|
 | M0 | Repo skeleton: `AGENTS.md`, `README.md`, D0001, this plan, `LICENSE` (MIT), `.gitignore` (`.foreman/`), `CONTRIBUTING.md` | No private names or services referenced |
 | M1 | Public GitHub repo, a minimal CI job (markdown link check) added via PR | CI green on a PR; merged via `gh pr merge --merge` |
-| M2 | R5.1 prior-art runs + R2 Codex capability check | Findings and decisions D0002–D0003 written |
+| M2 | R5.1 prior-art survey + R2 Codex capability check + CI options (R4 part) | Findings and decisions D0002–D0004 written (done 2026-10-30; hands-on trials still open) |
 | M3 | Foreman MVP: store, CLI, MCP (`create/list/claim/progress/submit/verify/approve`), with the repo using it for its own tasks from here on | Meta-repo's own next tasks are tracked in foreman |
 | M4 | agent-kit + R4 guardrails + CI template | R4 check passes on the demo |
 | M5 | docs-check + test-kit packages, ref preset, `examples/demo-app` | Demo boots, CI under 5 min |
