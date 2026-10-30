@@ -7,9 +7,11 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 - `docs/decisions/`: one file per decision, `Dnnnn-short-slug.md`.
 - `docs/research/`: findings, one file per track (`R5.md`), written when the track's check runs.
 - `packages/foreman/`: the task layer ([README](packages/foreman/README.md)).
+- `packages/agent-kit/`: guardrail baseline and templates ([README](packages/agent-kit/README.md)). This repo runs its own baseline (`.claude/settings.json`).
 
 ## Commands
-- `bun install`, then `bun run check` (typecheck + tests). CI runs the same command.
+- `bun install`, then `bun run check` (typecheck + tests). CI runs the same command, plus `bun audit`, gitleaks and zizmor.
+- `rm -rf` is denied here: use the tool's own clean command (e.g. `bun install --force`) or ask.
 
 ## Tasks
 Work on this repo is tracked in foreman itself (MCP server `foreman` in `.mcp.json`, or `bun packages/foreman/src/cli.ts`).

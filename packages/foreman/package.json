@@ -8,6 +8,6 @@
   "exports": { ".": "./src/core.ts" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   }
 }

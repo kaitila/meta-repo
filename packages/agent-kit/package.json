@@ -1,0 +1,9 @@
+{
+  "name": "@meta-repo/agent-kit",
+  "version": "0.1.0",
+  "description": "Agent guardrails and templates for Claude Code projects: settings baseline, hooks, subagents, skills",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "agent-kit": "src/cli.ts" },
+  "exports": { ".": "./src/install.ts" }
+}

@@ -1,0 +1,10 @@
+# Secret scanning config (CI job "secrets"). Built-in rules plus allowlists.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures"
+paths = [
+  '''(^|/)test/fixtures/''',
+  '''\.gitleaks\.toml$''',
+]
