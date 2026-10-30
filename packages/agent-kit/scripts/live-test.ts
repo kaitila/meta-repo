@@ -117,6 +117,11 @@ try {
   check("Write", "src/inside.txt", "ran", worker);
   expect(!existsSync(join(repo, "other", "outside.txt")), "the file outside the task's paths was not written");
   expect(existsSync(join(repo, "src", "inside.txt")), "the file inside the task's paths was written");
+  // Shell writes count too (T-0013), and a foreman that can't be reached blocks edits (T-0012).
+  check("Bash", "echo hi > other/shell.txt", "blocked", worker);
+  expect(!existsSync(join(repo, "other", "shell.txt")), "the shell redirect outside the task's paths wrote nothing");
+  check("Write", "src/unchecked.txt", "blocked", { ...worker, FOREMAN_BIN: "false" });
+  expect(!existsSync(join(repo, "src", "unchecked.txt")), "with foreman unreachable, nothing was written");
 
   console.log(`(cost $${cost.toFixed(3)}, ${model})`);
   const branches = Bun.spawnSync(["git", "branch", "--list"], { cwd: remote, stdout: "pipe" }).stdout.toString().trim();

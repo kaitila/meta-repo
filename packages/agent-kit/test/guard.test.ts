@@ -136,3 +136,73 @@ test("the copy this repo runs is the template", () => {
     readFileSync(join(import.meta.dir, "..", "templates/.claude/hooks/guard.ts"), "utf8"),
   );
 });
+
+describe("shell writes and task paths (T-0013)", () => {
+  const working = ctx({ taskPaths: () => ["src/**"] });
+  test.each([
+    "echo x > other/file.txt",
+    "echo x >> other/file.txt",
+    "printf x 2> other/err.log",
+    "cat a | tee other/copy.txt",
+    "cp src/a.ts other/a.ts",
+    "mv src/a.ts other/",
+    "cp -t other src/a.ts",
+    "install -m 644 src/a other/a",
+    "touch other/new.txt",
+    "sed -i 's/a/b/' other/x.ts",
+    "sed -i.bak -e 's/a/b/' other/x.ts",
+    "bash -c 'echo x > other/f'",
+    "echo SECRET=1 > .env",
+  ])("blocks: %s", (cmd) => {
+    expect(checkCommand(cmd, working)).not.toBeNull();
+  });
+  test.each([
+    "echo x > src/file.txt",
+    "cp other/a.ts src/a.ts",
+    "sed -i 's/a/b/' src/x.ts",
+    "bun test 2>&1 | tail -5",
+    "echo x > /dev/null",
+    "echo x > /tmp/scratch.txt",
+    "cat other/readme.md", // reading outside the paths is fine
+    "touch docs/tasks/T-0013.md",
+  ])("allows: %s", (cmd) => {
+    expect(checkCommand(cmd, working)).toBeNull();
+  });
+  test("no claimed task: shell writes aren't restricted", () => {
+    expect(checkCommand("echo x > other/file.txt", ctx())).toBeNull();
+  });
+});
+
+describe("fail closed when task paths can't be known (T-0012)", () => {
+  const broken = ctx({
+    taskPaths: () => {
+      throw new Error("FOREMAN_ACTOR is set but foreman isn't installed");
+    },
+  });
+  test("edits and shell writes in the repo are blocked with a reason naming foreman", () => {
+    const d = decide({ tool_name: "Edit", tool_input: { file_path: "/repo/src/a.ts" } }, broken);
+    expect(d?.deny).toContain("foreman");
+    expect(checkCommand("echo x > src/a.ts", broken)).toContain("foreman");
+  });
+  test("reads, commands without writes and files outside the repo still work", () => {
+    expect(decide({ tool_name: "Read", tool_input: { file_path: "/repo/src/a.ts" } }, broken)).toBeNull();
+    expect(checkCommand("git status", broken)).toBeNull();
+    expect(decide({ tool_name: "Write", tool_input: { file_path: "/tmp/x" } }, broken)).toBeNull();
+  });
+  test("realContext: actor set + foreman failing throws; no actor means no restriction", async () => {
+    const { realContext } = await import("../templates/.claude/hooks/guard");
+    const saved = { a: process.env.FOREMAN_ACTOR, b: process.env.FOREMAN_BIN };
+    try {
+      process.env.FOREMAN_ACTOR = "w1";
+      process.env.FOREMAN_BIN = "false"; // a command that always fails
+      expect(() => realContext(process.cwd()).taskPaths()).toThrow(/failed/);
+      delete process.env.FOREMAN_ACTOR;
+      expect(realContext(process.cwd()).taskPaths()).toBeNull();
+    } finally {
+      if (saved.a === undefined) delete process.env.FOREMAN_ACTOR;
+      else process.env.FOREMAN_ACTOR = saved.a;
+      if (saved.b === undefined) delete process.env.FOREMAN_BIN;
+      else process.env.FOREMAN_BIN = saved.b;
+    }
+  });
+});
