@@ -8,6 +8,7 @@ import { dirname, join, relative } from "node:path";
 export const TEMPLATES = join(import.meta.dir, "..", "templates");
 
 type Settings = { permissions?: Record<string, string[] | unknown> } & Record<string, unknown>;
+type HookGroup = { matcher?: string; hooks: { type: string; command: string; timeout?: number }[] };
 
 export interface InstallResult {
   created: string[];
@@ -36,6 +37,16 @@ export function mergeSettings(project: Settings, baseline: Settings): { settings
     if (mine.length || extra.length) perms[key] = [...mine, ...extra];
   }
   merged.permissions = perms;
+  // Hooks: add each baseline hook group whose command the project doesn't run yet.
+  const hooks: Record<string, HookGroup[]> = { ...((project.hooks as Record<string, HookGroup[]>) ?? {}) };
+  for (const [event, groups] of Object.entries((baseline.hooks as Record<string, HookGroup[]>) ?? {})) {
+    const mineGroups = hooks[event] ?? [];
+    const have = new Set(mineGroups.flatMap((g) => g.hooks.map((h) => h.command)));
+    const extra = groups.filter((g) => !g.hooks.every((h) => have.has(h.command)));
+    added += extra.length;
+    if (mineGroups.length || extra.length) hooks[event] = [...mineGroups, ...extra];
+  }
+  if (Object.keys(hooks).length) merged.hooks = hooks;
   return { settings: merged, added };
 }
 

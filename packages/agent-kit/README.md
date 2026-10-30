@@ -21,6 +21,19 @@ bun packages/agent-kit/src/cli.ts init [dir]
 
 Deny rules always beat allow rules, in any settings file. `settings.local.json` can add allows but can't undo a deny.
 
-These rules are the first layer, not a security boundary: Claude Code's docs say so, and the [live test](../../docs/research/R4-guardrails-tested.md) confirmed it. The other layers are a guard hook (coming: T-0002), CI, and branch protection on the server.
+These rules are the first layer, not a security boundary: Claude Code's docs say so, and the [live test](../../docs/research/R4-guardrails-tested.md) confirmed it.
+
+**`templates/.claude/hooks/guard.ts`** is the PreToolUse guard, wired in by the settings file. It needs Bun.
+- **It parses each command**, so it catches what text rules miss:
+  - `git -C . push origin main`, a bare `git push` while on main
+  - force-push in any spelling (`-fu`, `--force-with-lease`, `+branch`), deleting remote branches
+  - `--no-verify` / `commit -n`, `reset --hard`, `clean -f`
+  - recursive force `rm` in any spelling
+  - reading or writing `.env` files, also inside `bash -c` and inline code (`bun -e`, `node -e`, `python -c`)
+- **Quoted text that only mentions `.env` is allowed**, so `git commit -m "ignore .env files"` works.
+- **Task paths:** when the agent has `FOREMAN_ACTOR` set and holds a claimed foreman task with `paths`, edits outside those paths are refused. `docs/tasks/**`, where tasks are exported, is always allowed. It finds foreman through `$FOREMAN_BIN`, then `foreman` on the PATH, then `packages/foreman` in the repo.
+- **It fails closed:** a payload it can't read, or an internal error, blocks the call.
+
+Live check: `bun run live-test` runs real headless Claude sessions against both layers, about $0.06 with Haiku. The other layers are CI and branch protection on the server.
 
 **Coming:** the ship skill and test-writer, docs-writer and reviewer agents, wired to foreman (T-0006).

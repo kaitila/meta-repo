@@ -12,6 +12,7 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 ## Commands
 - `bun install`, then `bun run check` (typecheck + tests). CI runs the same command, plus `bun audit`, gitleaks and zizmor.
 - `rm -rf` is denied here: use the tool's own clean command (e.g. `bun install --force`) or ask.
+- A guard hook (`.claude/hooks/guard.ts`, a copy of agent-kit's template; a test keeps them equal) checks every command and edit. With `FOREMAN_ACTOR` set, edits must stay inside your claimed task's `paths`.
 
 ## Tasks
 Work on this repo is tracked in foreman itself (MCP server `foreman` in `.mcp.json`, or `bun packages/foreman/src/cli.ts`).

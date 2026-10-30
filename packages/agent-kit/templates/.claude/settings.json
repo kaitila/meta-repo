@@ -38,16 +38,7 @@
       "Read(**/*.key)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
-      "Read(~/.config/gh/**)",
-      "Bash(* .env)",
-      "Bash(* .env *)",
-      "Bash(*/.env)",
-      "Bash(*/.env *)",
-      "Bash(* .env.local*)",
-      "Bash(* .env.production*)",
-      "Bash(* .env.development*)",
-      "Bash(* .env.staging*)",
-      "Bash(* .env.test*)"
+      "Read(~/.config/gh/**)"
     ],
     "ask": [
       "Bash(gh pr merge *)",
@@ -70,6 +61,20 @@
       "Bash(gh pr diff*)",
       "Bash(gh repo view*)",
       "Read(**/.env.example)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.ts\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
