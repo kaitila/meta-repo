@@ -8,9 +8,10 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 - `docs/research/`: findings, one file per track (`R5.md`), written when the track's check runs.
 - `packages/foreman/`: the task layer ([README](packages/foreman/README.md)).
 - `packages/agent-kit/`: guardrail baseline and templates ([README](packages/agent-kit/README.md)). This repo runs its own baseline (`.claude/settings.json`).
+- `packages/docs-check/`: keeps the docs true to the code ([README](packages/docs-check/README.md)).
 
 ## Commands
-- `bun install`, then `bun run check` (typecheck + tests). `bun run link` once makes the foreman CLI available as `fm`. CI runs the same command, plus `bun audit`, gitleaks and zizmor.
+- `bun install`, then `bun run check` (typecheck, docs check, tests). `bun run link` once makes the foreman CLI available as `fm`. CI runs the same command, plus `bun audit`, gitleaks and zizmor.
 - `rm -rf` is denied here: use the tool's own clean command (e.g. `bun install --force`) or ask.
 - A guard hook (`.claude/hooks/guard.ts`, a copy of agent-kit's template; a test keeps them equal) checks every command and edit. With `FOREMAN_ACTOR` set, edits must stay inside your claimed task's `paths`.
 
@@ -20,11 +21,11 @@ Work on this repo is tracked in foreman itself (MCP server `foreman` in `.mcp.js
 - Before starting: `next_tasks`, then `claim_task`. Report with `report_progress`, hand in with `submit_task` and the PR.
 - Found other work on the way: `create_task` with `discoveredFrom`. Search `list_tasks` first.
 - Never verify your own task, and never approve: people sign off, and only on changes to protected paths (`foreman.json`, D0008). Record your branch with `report_progress` so foreman can diff it.
-- New decision file: get its number from `reserve_number` (kind `decision`).
+- New decision file: get its number from `reserve_number` (kind `decision`), then `bun run docs:check --write-index` to update the index.
 
 ## Rules
 - Research before building: don't build a step until its track's check has passed and the decision is recorded.
-- Every non-obvious choice gets a decision file in the same PR. Format: `# Dnnnn. Title (YYYY-MM-DD)`, then `**Status:** Active | Amended by Dx | Superseded by Dx | Paused`, then **Chosen**, **Why**, **Revisit if**.
+- Every non-obvious choice gets a decision file in the same PR. Format: `# Dnnnn. Title (YYYY-MM-DD)`, then `**Status:** Active | Amended by Dx | Superseded by Dx | Paused`, then `**Chosen:**`, `**Why:**`, `**Revisit if:**` in that order (an optional `**Context:**` first). `bun run docs:check` enforces it.
 - Plans are ordered steps with a check each. No dates or effort estimates.
 - Nothing here may depend on a hosted service or reference a private project, person or company.
 - PRs only. Never push to main or force-push.

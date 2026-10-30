@@ -26,7 +26,7 @@ What markdown does well is human review in PRs, readability with no tooling, and
 **Recommendation: SQLite is the live source of truth, and markdown is a projection.**
 - The DB lives in the *main checkout's* `.foreman/foreman.db` (gitignored, WAL mode), resolved from any worktree via `git rev-parse --git-common-dir`. Every worktree and agent sees one state. Claims are transactions with leases, and an append-only `events` table keeps the history.
 - Agents never touch the DB directly. They go through the `foreman` CLI or MCP server, so another agent tool can plug in later.
-- A task's **spec and acceptance checks** are exported to `docs/tasks/T-xxxx.md` inside the PR that delivers it, so reviewers see what was asked next to what was built. `foreman export` and `foreman import` rebuild the DB from git if it's lost.
+- A task's **spec and acceptance checks** are exported to `docs/tasks/T-<id>.md` inside the PR that delivers it, so reviewers see what was asked next to what was built. `foreman export` and `foreman import` rebuild the DB from git if it's lost.
 
 This is close to what Beads converged on (a DB plus a git-tracked export). R5.1 checks that before we commit to it.
 
@@ -69,7 +69,7 @@ meta-repo/                          (MIT, public)
   - Spend controls: a per-task turn/cost budget, a global concurrency cap and a kill switch.
 - **Agent hooks:** `SessionStart` injects the claimed task. `PreToolUse` blocks edits outside the task's `paths` (this is gamma's open item A5). `Stop` runs the fast gate and posts progress. Equivalents for Codex are mapped in R4.
 
-## Research tracks (each ends in a decision file + `docs/research/Rn.md`)
+## Research tracks (each ends in a decision file + `docs/research/R<n>.md`)
 
 | Track | Key questions | Check |
 |---|---|---|
@@ -98,6 +98,6 @@ meta-repo/                          (MIT, public)
 
 ## Verification
 
-- Each track's check is run, and its result goes into `docs/research/Rn.md`. Nothing is marked done on a claim alone.
+- Each track's check is run, and its result goes into `docs/research/R<n>.md`. Nothing is marked done on a claim alone.
 - `examples/demo-app` is the permanent end-to-end test. CI regenerates it from the preset and runs its full suite.
 - The final check is a fresh machine: `bunx create-<name> my-app`, then `foreman serve`. Give intake a one-paragraph feature idea, and it should reach a merged, verified PR using Claude Code workers, with only approval clicks from a human.

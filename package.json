@@ -6,11 +6,12 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "bun run typecheck && bun test",
-    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit",
+    "check": "bun run typecheck && bun run docs:check && bun test",
+    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/docs-check",
     "test": "bun test",
     "live-test": "bun packages/agent-kit/scripts/live-test.ts",
-    "link": "cd packages/foreman && bun link"
+    "link": "cd packages/foreman && bun link",
+    "docs:check": "bun packages/docs-check/src/cli.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.5",

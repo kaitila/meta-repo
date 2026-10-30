@@ -1,4 +1,4 @@
-# D0008. A person approves only guardrail changes; the real diff decides (2026-10-31)
+# D0008. A person approves only guardrail changes; the real diff decides (2026-10-30)
 
 **Status:** Active
 

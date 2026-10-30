@@ -16,7 +16,7 @@ Lines marked *(unverified)* are not confirmed in the docs. Hands-on runs of the 
 
 | | Claude Code | Codex CLI |
 |---|---|---|
-| **Instructions** | `CLAUDE.md` (+ `.claude/rules/`); `@file` imports (up to 4 hops); subdirectory files load on demand | `AGENTS.md` (or `AGENTS.override.md`) from the git root down to the working directory, one per directory; **no imports**; 32 KiB combined limit; **subdirectory files below the working directory never load** |
+| **Instructions** | `CLAUDE.md` (+ `.claude/rules/`); `@file` imports (up to 4 hops); subdirectory files load on demand | `AGENTS.md` (or `AGENTS.override.md`) from the git root down to the working directory, one per directory; **no imports**; 32 KiB combined limit; **subdirectory files below the working directory never load** | <!-- docs-check: elsewhere -->
 | **Skills** | `.claude/skills/<n>/SKILL.md` (agentskills.io format plus extra keys) | `.agents/skills/<n>/SKILL.md` (agentskills.io format; optional `agents/openai.yaml`) |
 | **Subagents** | `.claude/agents/*.md`, with per-agent tools, model, permission mode, max turns, hooks, worktree isolation | `.codex/agents/*.toml` (`developer_instructions`); **cannot set sandbox, approvals or MCP per agent** |
 | **Hooks** | Many events; PreToolUse blocks with `permissionDecision:"deny"` or exit 2 | `.codex/hooks.json`: PreToolUse, PostToolUse, SessionStart, Stop, and others; same deny output; **fails open** on error or timeout; hosted tools (web search) are not covered; needs trust (`/hooks`) |
