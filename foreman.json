@@ -9,6 +9,12 @@
     "renovate.json",
     "foreman.json",
     "packages/foreman/src/**",
-    "packages/agent-kit/templates/**"
+    "packages/agent-kit/templates/**",
+    "package.json",
+    "**/package.json",
+    "bun.lock",
+    "**/tsconfig*.json",
+    "AGENTS.md",
+    "CLAUDE.md"
   ]
 }

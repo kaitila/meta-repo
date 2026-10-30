@@ -235,3 +235,49 @@ describe("risk from paths (D0008)", () => {
     expect(f.events(t.id).find((e) => e.type === "escalated")?.data.reason).toContain("couldn't see");
   });
 });
+
+describe("the PR decides, not the reported branch (T-0016)", () => {
+  const { gitPolicy, GITHUB_PR } = require("../src/policy") as typeof import("../src/policy");
+  const PR = "https://github.com/acme/app/pull/7";
+
+  test("a GitHub PR's own files are used; the recorded branch is ignored", () => {
+    const calls: string[][] = [];
+    const policy = gitPolicy("/repo", (cmd) => {
+      calls.push(cmd);
+      return cmd[0] === "gh" ? "src/a.ts\n.github/workflows/ci.yml" : "";
+    });
+    expect(policy.changedFiles({ branch: "an-empty-branch", pr: PR })).toEqual(["src/a.ts", ".github/workflows/ci.yml"]);
+    expect(calls).toEqual([["gh", "pr", "diff", PR, "--name-only"]]);
+  });
+
+  test("gh failing means unknown, not clean", () => {
+    expect(gitPolicy("/repo", () => null).changedFiles({ branch: "b", pr: PR })).toBeNull();
+  });
+
+  test("an auto task with a clean branch but a protected change in its PR is escalated", () => {
+    let clock = 1;
+    const policy = gitPolicy("/repo", (cmd) => (cmd[0] === "gh" ? "AGENTS.md" : ""));
+    const f = new Foreman(openDb(":memory:"), null, () => ++clock, policy);
+    const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    f.claim(t.id, worker);
+    f.progress(t.id, worker, { branch: "clean" });
+    f.submit(t.id, worker, { pr: PR });
+    f.startVerify(t.id, verifier);
+    expect(f.recordVerify(t.id, verifier, [{ check: "c1", pass: true, evidence: "ok" }]).status).toBe("needs_approval");
+  });
+
+  test("an empty diff escalates", () => {
+    const { f } = setup([]);
+    const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
+    f.claim(t.id, worker);
+    f.submit(t.id, worker, { pr: "#1" });
+    f.startVerify(t.id, verifier);
+    expect(f.recordVerify(t.id, verifier, [{ check: "c1", pass: true, evidence: "ok" }]).status).toBe("needs_approval");
+  });
+
+  test("GitHub PR URL shape", () => {
+    expect(GITHUB_PR.test(PR)).toBe(true);
+    expect(GITHUB_PR.test("#7")).toBe(false);
+    expect(GITHUB_PR.test("https://github.com/acme/app/pull/7; rm x")).toBe(false);
+  });
+});

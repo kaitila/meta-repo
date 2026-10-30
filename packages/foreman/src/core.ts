@@ -404,8 +404,9 @@ export class Foreman {
   recordVerify(id: string, actor: Actor, results: CheckResult[]): Task {
     // Outside the transaction: it runs git. The branch can't change under us in a way
     // that matters, because escalation only ever adds a person.
-    const branch = this.get(id).branch;
-    const changed = this.get(id).risk === "auto" ? this.policy.changedFiles(branch) : [];
+    const before = this.get(id);
+    const branch = before.branch;
+    const changed = before.risk === "auto" ? this.policy.changedFiles({ branch, pr: before.pr }) : [];
     return this.tx(() => {
       const t = this.get(id);
       this.expect(t, ["verifying"], "record a verdict on");
@@ -425,11 +426,13 @@ export class Foreman {
       this.event(id, actor, pass ? "verified" : "verify_failed", { results });
       if (next === "approved") {
         // The real diff decides (D0008): a protected file, or a diff we can't see, needs a person.
-        const hit = changed === null ? null : changed.filter((f) => isProtected(f, this.policy.protectedPaths));
+        // An empty diff is as good as none: nothing to approve automatically.
+        const seen = changed && changed.length ? changed : null;
+        const hit = seen === null ? null : seen.filter((f) => isProtected(f, this.policy.protectedPaths));
         if (hit === null || hit.length) {
           next = "needs_approval";
           this.set(id, { status: next });
-          this.event(id, actor, "escalated", hit === null ? { reason: "couldn't see the branch's changes", branch } : { reason: "changes protected paths", files: hit });
+          this.event(id, actor, "escalated", hit === null ? { reason: "couldn't see the PR's changes (none found)", branch, pr: before.pr } : { reason: "changes protected paths", files: hit });
         }
       }
       return this.get(id);

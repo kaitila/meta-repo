@@ -2,9 +2,10 @@
 // passes it) unless it touches protected paths: the guardrails, CI and foreman itself.
 // Agents must not approve changes to their own limits.
 //
-// The files a branch really changed decide, not what the task declared: a passing
-// verdict on an "auto" task is escalated to a person if the diff touches a protected
-// path, or if the diff can't be worked out (fail closed).
+// The files the PR really changes decide, not what the task declared or which branch
+// the worker reports: a passing verdict on an "auto" task is escalated to a person if
+// the diff touches a protected path, or if it can't be worked out or is empty (fail
+// closed). A GitHub PR's own file list is used when the task's PR is a GitHub URL.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -15,12 +16,21 @@ export const DEFAULT_PROTECTED = [
   ".github/**",
   ".mcp.json",
   "foreman.json",
+  // What defines the checks and the agents' instructions.
+  "package.json",
+  "**/package.json",
+  "bun.lock",
+  "**/tsconfig*.json",
+  "AGENTS.md",
+  "**/AGENTS.md",
+  "CLAUDE.md",
+  "**/CLAUDE.md",
 ];
 
 export interface Policy {
   protectedPaths: string[];
-  /** Files the task's branch changed relative to main, or null if unknown. */
-  changedFiles(branch: string | null): string[] | null;
+  /** Files the task's PR (or, without a GitHub PR, its branch) changes; null if unknown. */
+  changedFiles(task: { branch: string | null; pr: string | null }): string[] | null;
 }
 
 export function loadProtected(root: string | null): string[] {
@@ -54,16 +64,34 @@ export function mayTouchProtected(paths: string[], protectedPaths: string[]): bo
   );
 }
 
-function git(root: string, args: string[]): string | null {
-  const p = Bun.spawnSync(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
-  return p.exitCode === 0 ? p.stdout.toString().trim() : null;
-}
+type Run = (cmd: string[], cwd: string) => string | null;
 
-export function gitPolicy(root: string | null): Policy {
+const defaultRun: Run = (cmd, cwd) => {
+  try {
+    const p = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe", timeout: 30_000 });
+    return p.exitCode === 0 ? p.stdout.toString().trim() : null;
+  } catch {
+    return null; // e.g. gh not installed
+  }
+};
+
+export const GITHUB_PR = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+\/?$/;
+
+export function gitPolicy(root: string | null, run: Run = defaultRun): Policy {
+  const git = (r: string, args: string[]) => run(["git", ...args], r);
   return {
     protectedPaths: loadProtected(root),
-    changedFiles(branch) {
-      if (!root || !branch) return null;
+    changedFiles({ branch, pr }) {
+      if (!root) return null;
+      // The PR is what gets merged: ask GitHub for its files. A worker can't steer this
+      // by recording some other branch.
+      if (pr && GITHUB_PR.test(pr)) {
+        const out = run(["gh", "pr", "diff", pr, "--name-only"], root);
+        return out === null ? null : out.split("\n").filter(Boolean);
+      }
+      // No GitHub PR (local-only workflows): fall back to the recorded branch. Weaker,
+      // because the worker names the branch (D0008).
+      if (!branch) return null;
       const ref = [branch, `origin/${branch}`].find((r) => git(root, ["rev-parse", "--verify", "--quiet", r]));
       if (!ref) return null;
       const base = ["origin/main", "main", "origin/master", "master"]
