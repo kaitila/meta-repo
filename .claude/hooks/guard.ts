@@ -48,6 +48,7 @@ export const isEnvFile = (p: string) => ENV_FILE.test(p) && !ENV_OK.test(p);
 export interface SimpleCommand {
   words: string[]; // quotes removed; input-redirect targets included ("cat < .env" → cat .env)
   writes: string[]; // output-redirect targets ("echo x > out.txt" → out.txt)
+  heredocs: string[]; // here-document bodies: data, unless the command is a shell
 }
 
 /** Split a command line into simple commands, each a list of words with quotes removed. */
@@ -62,6 +63,9 @@ export function parseCommands(src: string): SimpleCommand[] {
   let word = "";
   let inWord = false;
   let redirectOut = false;
+  let heredocs: string[] = [];
+  // Here-documents declared on the current line: their bodies start after the newline.
+  const pending: { delim: string; strip: boolean; quoted: boolean; into: string[] }[] = [];
   const endWord = () => {
     if (inWord) (redirectOut ? writes : words).push(word);
     if (inWord) redirectOut = false;
@@ -70,9 +74,32 @@ export function parseCommands(src: string): SimpleCommand[] {
   };
   const endCommand = () => {
     endWord();
-    if (words.length || writes.length) commands.push({ words, writes });
+    if (words.length || writes.length || heredocs.length) commands.push({ words, writes, heredocs });
     words = [];
     writes = [];
+    heredocs = [];
+  };
+  /** Read the bodies of pending here-documents starting at `from`; returns where parsing resumes. */
+  const readBodies = (from: number): number => {
+    let pos = from;
+    for (const { delim, strip, quoted, into } of pending) {
+      const lines: string[] = [];
+      for (;;) {
+        if (pos >= src.length) break; // unterminated: the rest is the body, as bash does
+        const nl = src.indexOf("\n", pos);
+        const end = nl < 0 ? src.length : nl;
+        const raw = src.slice(pos, end);
+        pos = end + 1;
+        if ((strip ? raw.replace(/^\t+/, "") : raw) === delim) break;
+        lines.push(raw);
+      }
+      const body = lines.join("\n");
+      into.push(body);
+      // An unquoted delimiter means the shell expands $(...) and backticks in the body.
+      if (!quoted) for (const sub of substitutions(body)) for (const cmd of parseCommands(sub)) commands.push(cmd);
+    }
+    pending.length = 0;
+    return pos - 1; // the loop's i++ lands on the first character after the bodies
   };
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!;
@@ -125,9 +152,38 @@ export function parseCommands(src: string): SimpleCommand[] {
         i++;
         while (/[\d-]/.test(src[i + 1] ?? "")) i++;
       } else redirectOut = true;
+    } else if (c === "<" && src[i + 1] === "<" && src[i + 2] === "<") {
+      // Here-string: the next word is data, kept as an ordinary word.
+      endWord();
+      i += 2;
+    } else if (c === "<" && src[i + 1] === "<") {
+      // Here-document: <<EOF, <<'EOF', <<"EOF", <<-EOF. The body follows the line.
+      endWord();
+      i += 2;
+      const strip = src[i] === "-";
+      if (strip) i++;
+      while (src[i] === " " || src[i] === "\t") i++;
+      let delim = "";
+      const quoted = src[i] === "'" || src[i] === '"';
+      if (quoted) {
+        const q = src[i]!;
+        const j = src.indexOf(q, i + 1);
+        if (j < 0) throw new Error(`unclosed ${q}`);
+        delim = src.slice(i + 1, j);
+        i = j;
+      } else {
+        while (i < src.length && !/[\s;&|<>()]/.test(src[i]!)) delim += src[i++];
+        i--;
+      }
+      if (!delim) throw new Error("here-document without a delimiter");
+      pending.push({ delim, strip, quoted, into: heredocs });
     } else if (c === "<") {
       // Input redirection: its target is an ordinary word ("cat < .env").
       endWord();
+    } else if (c === "\n" && pending.length) {
+      // The line that declared here-documents ends: read their bodies, then the command ends.
+      i = readBodies(i + 1);
+      endCommand();
     } else if (c === ";" || c === "&" || c === "|" || c === "\n" || c === "(" || c === ")") {
       endCommand();
     } else if (c === " " || c === "\t") {
@@ -139,6 +195,29 @@ export function parseCommands(src: string): SimpleCommand[] {
   }
   endCommand();
   return commands;
+}
+
+/** The command substitutions inside text the shell expands: `$(...)` and backticks. */
+function substitutions(text: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "$" && text[i + 1] === "(") {
+      let depth = 1;
+      let j = i + 2;
+      for (; j < text.length && depth; j++) {
+        if (text[j] === "(") depth++;
+        else if (text[j] === ")") depth--;
+      }
+      out.push(text.slice(i + 2, j - 1));
+      i = j - 1;
+    } else if (text[i] === "`") {
+      const j = text.indexOf("`", i + 1);
+      if (j < 0) break;
+      out.push(text.slice(i + 1, j));
+      i = j;
+    }
+  }
+  return out;
 }
 
 /** Drop `VAR=value` prefixes and wrappers such as `sudo`, `timeout 10`, `env -i`. */
@@ -288,7 +367,7 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
   } catch (e) {
     return `couldn't parse the command (${(e as Error).message})`;
   }
-  for (const { words: raw, writes } of commands) {
+  for (const { words: raw, writes, heredocs } of commands) {
     for (const target of writes) {
       const r = editRule(target, ctx);
       if (r) return r;
@@ -304,6 +383,13 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
     if (head === "rm") {
       const r = rmRule(args);
       if (r) return r;
+    }
+    // `bash <<EOF ... EOF` runs the body as a script.
+    if (SHELLS.has(head)) {
+      for (const body of heredocs) {
+        const r = checkCommand(body, ctx, depth + 1);
+        if (r) return r;
+      }
     }
     if (SHELLS.has(head) || head === "eval") {
       const ci = args.indexOf("-c");
