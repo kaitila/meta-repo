@@ -359,6 +359,12 @@ function inlineCode(head: string, args: string[]): string[] {
   return INTERPRETERS.has(head) ? out : [];
 }
 
+/** Code (not shell) that names a .env file in a string literal. */
+function codeReadsEnv(code: string): boolean {
+  const m = code.match(/["'`]([^"'`]*\.env(\.[A-Za-z0-9_.-]+)?)["'`]/g) ?? [];
+  return m.some((s) => isEnvFile(s.slice(1, -1)));
+}
+
 export function checkCommand(command: string, ctx: Context, depth = 0): string | null {
   if (depth > 3) return "command nests shells too deeply to check";
   let commands: SimpleCommand[];
@@ -367,7 +373,27 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
   } catch (e) {
     return `couldn't parse the command (${(e as Error).message})`;
   }
-  for (const { words: raw, writes, heredocs } of commands) {
+  // Here-document bodies run as code when anything in the command line reads a script
+  // from stdin: `bash <<EOF`, `cat <<EOF | bash`, `source /dev/stdin <<EOF`.
+  const heads = commands.map((c) => {
+    const w = unwrap(c.words);
+    return { head: w[0] ? basename(w[0]) : "", args: w.slice(1) };
+  });
+  const bodies = commands.flatMap((c) => c.heredocs);
+  if (bodies.length) {
+    const runsStdin = heads.some(
+      (h) => (SHELLS.has(h.head) && !h.args.includes("-c")) || ((h.head === "source" || h.head === ".") && h.args[0] === "/dev/stdin"),
+    );
+    if (runsStdin) {
+      for (const body of bodies) {
+        const r = checkCommand(body, ctx, depth + 1);
+        if (r) return r;
+      }
+    }
+    // An interpreter fed a heredoc (`python3 <<EOF`) runs it as code we can't parse: scan it like `-e` code.
+    if (heads.some((h) => INTERPRETERS.has(h.head)) && bodies.some(codeReadsEnv)) return "inline code reads a .env file";
+  }
+  for (const { words: raw, writes } of commands) {
     for (const target of writes) {
       const r = editRule(target, ctx);
       if (r) return r;
@@ -384,13 +410,6 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
       const r = rmRule(args);
       if (r) return r;
     }
-    // `bash <<EOF ... EOF` runs the body as a script.
-    if (SHELLS.has(head)) {
-      for (const body of heredocs) {
-        const r = checkCommand(body, ctx, depth + 1);
-        if (r) return r;
-      }
-    }
     if (SHELLS.has(head) || head === "eval") {
       const ci = args.indexOf("-c");
       const script = head === "eval" ? args.join(" ") : ci >= 0 ? args[ci + 1] : undefined;
@@ -400,8 +419,7 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
       }
     }
     for (const code of inlineCode(head, args)) {
-      const m = code.match(/["'`]([^"'`]*\.env(\.[A-Za-z0-9_.-]+)?)["'`]/g) ?? [];
-      if (m.some((s) => isEnvFile(s.slice(1, -1)))) return "inline code reads a .env file";
+      if (codeReadsEnv(code)) return "inline code reads a .env file";
     }
     for (const target of writeTargets(head, args)) {
       const r = editRule(target, ctx);
