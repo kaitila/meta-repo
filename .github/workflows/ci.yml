@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check links between docs
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Offline: only links inside the repo, so the check never fails on someone else's site.
+          args: --offline --no-progress --include-fragments './**/*.md'
+          fail: true
