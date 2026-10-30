@@ -31,7 +31,12 @@ These rules are the first layer, not a security boundary: Claude Code's docs say
   - recursive force `rm` in any spelling
   - reading or writing `.env` files, also inside `bash -c` and inline code (`bun -e`, `node -e`, `python -c`)
 - **Quoted text that only mentions `.env` is allowed**, so `git commit -m "ignore .env files"` works.
-- **Task paths:** when the agent has `FOREMAN_ACTOR` set and holds a claimed foreman task with `paths`, edits outside those paths are refused. `docs/tasks/**`, where tasks are exported, is always allowed. It finds foreman through `$FOREMAN_BIN`, then `foreman` on the PATH, then `packages/foreman` in the repo.
+- **Task paths:** when the agent has `FOREMAN_ACTOR` set and holds a claimed foreman task with `paths`, writes outside those paths are refused.
+  - This covers the edit tools and shell writes: `>`/`>>` redirects, `tee`, `cp`, `mv`, `install`, `ln`, `touch` and `sed -i`.
+  - `docs/tasks/**`, where tasks are exported, is always allowed, and so are files outside the repo.
+  - It finds foreman through `$FOREMAN_BIN`, then `foreman` on the PATH, then `packages/foreman` in the repo.
+  - **With `FOREMAN_ACTOR` set but foreman unreachable**, writes in the repo are blocked with a reason, instead of quietly going unchecked.
+  - **Known limits:** writes made by scripts and interpreters (`bun -e`, `python -c`, a build tool) aren't traced, and neither is `cd x && ...`. The verifier's changed-paths check is the backstop.
 - **It fails closed:** a payload it can't read, or an internal error, blocks the call.
 
 Live check: `bun run live-test` runs real headless Claude sessions against both layers, about $0.06 with Haiku. The other layers are CI and branch protection on the server.

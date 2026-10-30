@@ -7,10 +7,12 @@
 //   - recursive force rm in any spelling
 //   - reading or writing .env files (not .env.example), also through `bash -c` and
 //     inline scripts (`bun -e`, `node -e`, `python -c`, ...)
-//   - edits outside the paths of the foreman task this agent has claimed
+//   - edits outside the paths of the foreman task this agent has claimed, through the
+//     edit tools or the shell (redirects, tee, cp, mv, install, touch, sed -i)
 //
 // It parses commands, so quoted text that only mentions `.env` is fine.
-// It fails closed: a payload it can't read is blocked.
+// It fails closed: a payload it can't read is blocked, and so is an edit whose task
+// paths can't be checked because foreman is unreachable.
 // Self-contained on purpose: a project gets a copy, with no package to install.
 import { relative, resolve, basename, isAbsolute } from "node:path";
 
@@ -23,7 +25,10 @@ export interface Context {
   cwd: string;
   /** Current branch of the repo at `dir`, or null if unknown. */
   branchAt: (dir: string) => string | null;
-  /** Globs the agent's claimed tasks allow, or null when no task restricts paths. */
+  /**
+   * Globs the agent's claimed tasks allow, or null when no task restricts paths.
+   * Throws when it should know but can't (FOREMAN_ACTOR set, foreman unreachable).
+   */
   taskPaths: () => string[] | null;
 }
 
@@ -40,21 +45,34 @@ export const isEnvFile = (p: string) => ENV_FILE.test(p) && !ENV_OK.test(p);
 
 // ---------- shell parsing (enough of it: words, quotes, separators, redirections) ----------
 
+export interface SimpleCommand {
+  words: string[]; // quotes removed; input-redirect targets included ("cat < .env" → cat .env)
+  writes: string[]; // output-redirect targets ("echo x > out.txt" → out.txt)
+}
+
 /** Split a command line into simple commands, each a list of words with quotes removed. */
 export function parseShell(src: string): string[][] {
-  const commands: string[][] = [];
+  return parseCommands(src).map((c) => c.words);
+}
+
+export function parseCommands(src: string): SimpleCommand[] {
+  const commands: SimpleCommand[] = [];
   let words: string[] = [];
+  let writes: string[] = [];
   let word = "";
   let inWord = false;
+  let redirectOut = false;
   const endWord = () => {
-    if (inWord) words.push(word);
+    if (inWord) (redirectOut ? writes : words).push(word);
+    if (inWord) redirectOut = false;
     word = "";
     inWord = false;
   };
   const endCommand = () => {
     endWord();
-    if (words.length) commands.push(words);
+    if (words.length || writes.length) commands.push({ words, writes });
     words = [];
+    writes = [];
   };
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!;
@@ -69,13 +87,13 @@ export function parseShell(src: string): string[][] {
       i = j;
     } else if (c === '"') {
       let j = i + 1;
-      let s = "";
+      let str = "";
       for (; j < src.length && src[j] !== '"'; j++) {
-        if (src[j] === "\\" && j + 1 < src.length) s += src[++j];
-        else s += src[j];
+        if (src[j] === "\\" && j + 1 < src.length) str += src[++j];
+        else str += src[j];
       }
       if (j >= src.length) throw new Error('unclosed "');
-      word += s;
+      word += str;
       inWord = true;
       i = j;
     } else if (c === "$" && src[i + 1] === "(") {
@@ -86,21 +104,32 @@ export function parseShell(src: string): string[][] {
         if (src[j] === "(") depth++;
         else if (src[j] === ")") depth--;
       }
-      for (const sub of parseShell(src.slice(i + 2, j - 1))) commands.push(sub);
+      for (const sub of parseCommands(src.slice(i + 2, j - 1))) commands.push(sub);
       word += "$(...)";
       inWord = true;
       i = j - 1;
     } else if (c === "`") {
       const j = src.indexOf("`", i + 1);
       if (j < 0) throw new Error("unclosed `");
-      for (const sub of parseShell(src.slice(i + 1, j))) commands.push(sub);
+      for (const sub of parseCommands(src.slice(i + 1, j))) commands.push(sub);
       i = j;
+    } else if (c === ">") {
+      // Output redirection. A file-descriptor number right before it ("2>") isn't a word,
+      // and ">&1" duplicates a descriptor rather than naming a file.
+      if (inWord && /^\d+$/.test(word)) {
+        word = "";
+        inWord = false;
+      } else endWord();
+      while (src[i + 1] === ">") i++;
+      if (src[i + 1] === "&") {
+        i++;
+        while (/[\d-]/.test(src[i + 1] ?? "")) i++;
+      } else redirectOut = true;
+    } else if (c === "<") {
+      // Input redirection: its target is an ordinary word ("cat < .env").
+      endWord();
     } else if (c === ";" || c === "&" || c === "|" || c === "\n" || c === "(" || c === ")") {
       endCommand();
-    } else if (c === "<" || c === ">") {
-      // A redirection: its target is a word of its own ("cat < .env", "echo x > .env").
-      endWord();
-      while (src[i + 1] === ">" || src[i + 1] === "&") i++;
     } else if (c === " " || c === "\t") {
       endWord();
     } else {
@@ -211,6 +240,37 @@ function rmRule(args: string[]): string | null {
   return recursive && force ? "recursive force rm is denied here; use the tool's own clean command or ask" : null;
 }
 
+/** Files a command writes to, for the commands that commonly write files. */
+export function writeTargets(head: string, args: string[]): string[] {
+  const plain = (xs: string[]) => xs.filter((a) => !a.startsWith("-"));
+  if (head === "tee" || head === "touch") return plain(args);
+  if (head === "cp" || head === "mv" || head === "install" || head === "ln") {
+    const t = args.findIndex((a) => a === "-t" || a === "--target-directory");
+    if (t >= 0 && args[t + 1]) return [args[t + 1]!];
+    const longT = args.find((a) => a.startsWith("--target-directory="));
+    if (longT) return [longT.split("=")[1]!];
+    const rest = plain(args);
+    return rest.length >= 2 ? [rest[rest.length - 1]!] : [];
+  }
+  if (head === "sed" && args.some((a) => a === "-i" || a.startsWith("-i") || a.startsWith("--in-place"))) {
+    // The script is the first plain word unless given with -e/-f.
+    const out: string[] = [];
+    let scriptGiven = false;
+    for (let k = 0; k < args.length; k++) {
+      const a = args[k]!;
+      if (a === "-e" || a === "-f" || a === "--expression" || a === "--file") {
+        scriptGiven = true;
+        k++;
+      } else if (!a.startsWith("-")) {
+        if (!scriptGiven) scriptGiven = true;
+        else out.push(a);
+      }
+    }
+    return out;
+  }
+  return [];
+}
+
 function inlineCode(head: string, args: string[]): string[] {
   // `bun -e '...'`, `node -e`, `python -c`, `perl -e`, ...: the code is text we must scan.
   const out: string[] = [];
@@ -222,13 +282,17 @@ function inlineCode(head: string, args: string[]): string[] {
 
 export function checkCommand(command: string, ctx: Context, depth = 0): string | null {
   if (depth > 3) return "command nests shells too deeply to check";
-  let commands: string[][];
+  let commands: SimpleCommand[];
   try {
-    commands = parseShell(command);
+    commands = parseCommands(command);
   } catch (e) {
     return `couldn't parse the command (${(e as Error).message})`;
   }
-  for (const raw of commands) {
+  for (const { words: raw, writes } of commands) {
+    for (const target of writes) {
+      const r = editRule(target, ctx);
+      if (r) return r;
+    }
     const words = unwrap(raw);
     if (!words.length) continue;
     const head = basename(words[0]!);
@@ -253,6 +317,10 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
       const m = code.match(/["'`]([^"'`]*\.env(\.[A-Za-z0-9_.-]+)?)["'`]/g) ?? [];
       if (m.some((s) => isEnvFile(s.slice(1, -1)))) return "inline code reads a .env file";
     }
+    for (const target of writeTargets(head, args)) {
+      const r = editRule(target, ctx);
+      if (r) return r;
+    }
     // Any argument that IS a .env path (not text that mentions one).
     const envArg = args.find((a) => !a.includes(" ") && isEnvFile(a.replace(/^[<>]+/, "")));
     if (envArg && head !== "echo" && head !== "printf") return `${envArg} holds secrets: agents don't read or copy it`;
@@ -265,7 +333,12 @@ function editRule(path: string, ctx: Context): string | null {
   const abs = isAbsolute(path) ? path : resolve(ctx.cwd, path);
   const rel = relative(ctx.projectRoot, abs);
   if (rel.startsWith("..") || isAbsolute(rel)) return null; // outside the repo: not a task's business
-  const paths = ctx.taskPaths();
+  let paths: string[] | null;
+  try {
+    paths = ctx.taskPaths();
+  } catch (e) {
+    return `can't check your task's paths: ${(e as Error).message}`;
+  }
   if (!paths || paths.length === 0) return null;
   const ok = [...paths, ...ALWAYS_EDITABLE].some((g) => new Bun.Glob(g).match(rel));
   return ok ? null : `${rel} is outside your task's paths (${paths.join(", ")}); file a task for it instead`;
@@ -304,20 +377,28 @@ function foremanCmd(root: string): string[] | null {
 }
 
 export function realContext(cwd: string): Context {
+  let cached: string[] | null | undefined;
   const projectRoot = process.env.CLAUDE_PROJECT_DIR || sh(["git", "rev-parse", "--show-toplevel"], cwd) || cwd;
   return {
     projectRoot,
     cwd,
     branchAt: (dir) => sh(["git", "branch", "--show-current"], dir),
     taskPaths: () => {
-      if (!process.env.FOREMAN_ACTOR) return null; // no identity, no task to hold to
+      if (cached !== undefined) return cached;
+      if (!process.env.FOREMAN_ACTOR) return (cached = null); // no identity, no task to hold to
+      // With an identity set, not knowing the task's paths is an error, not a free pass.
       const fm = foremanCmd(projectRoot);
-      if (!fm) return null;
+      if (!fm) throw new Error("FOREMAN_ACTOR is set but foreman isn't installed (set FOREMAN_BIN)");
       const out = sh([...fm, "list", "--mine", "--status", "claimed", "--status", "in_progress", "--json"], projectRoot);
-      if (!out) return null;
-      const tasks = JSON.parse(out) as { paths: string[] }[];
-      if (!tasks.length || tasks.some((t) => t.paths.length === 0)) return null;
-      return tasks.flatMap((t) => t.paths);
+      if (out === null) throw new Error(`FOREMAN_ACTOR is set but \`${fm.join(" ")} list\` failed`);
+      let tasks: { paths: string[] }[];
+      try {
+        tasks = JSON.parse(out);
+      } catch {
+        throw new Error("foreman's answer wasn't JSON");
+      }
+      if (!tasks.length || tasks.some((t) => t.paths.length === 0)) return (cached = null);
+      return (cached = tasks.flatMap((t) => t.paths));
     },
   };
 }
