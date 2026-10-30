@@ -26,8 +26,10 @@ draft → ready → claimed → in_progress → in_review → verifying → appr
 
 ## Use
 
+One-time setup, from the repo root: `bun install && bun run link`. This links the `fm` command (and `foreman`, the same thing) into `~/.bun/bin`. After that, run `fm` in any git repository: it uses that repo's tasks, because the database is found from the current directory. Without the link, `bun packages/foreman/src/cli.ts` does the same.
+
 ```sh
-bun packages/foreman/src/cli.ts help        # or `foreman help` once linked
+fm help
 
 foreman add "Add a stage filter" --check "cmd: bun test" --check "the filter shows on /investors" \
   --path "web/src/pages/**" --risk review --ready

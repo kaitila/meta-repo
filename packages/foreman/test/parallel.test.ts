@@ -106,3 +106,9 @@ test("real git: a branch that changes a protected file is escalated; an unprotec
   expect(run("plain", "src/a.ts")).toBe("approved");
   expect(run("sneaky", ".github/workflows/ci.yml")).toBe("needs_approval");
 });
+
+test("outside a git repository: a one-line error, not a stack trace", () => {
+  const r = sh(["bun", CLI, "list"], tmpdir());
+  expect(r.code).toBe(1);
+  expect(r.err.trim()).toMatch(/^foreman: not inside a git repository/);
+});

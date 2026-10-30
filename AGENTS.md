@@ -10,7 +10,7 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 - `packages/agent-kit/`: guardrail baseline and templates ([README](packages/agent-kit/README.md)). This repo runs its own baseline (`.claude/settings.json`).
 
 ## Commands
-- `bun install`, then `bun run check` (typecheck + tests). CI runs the same command, plus `bun audit`, gitleaks and zizmor.
+- `bun install`, then `bun run check` (typecheck + tests). `bun run link` once makes the foreman CLI available as `fm`. CI runs the same command, plus `bun audit`, gitleaks and zizmor.
 - `rm -rf` is denied here: use the tool's own clean command (e.g. `bun install --force`) or ask.
 - A guard hook (`.claude/hooks/guard.ts`, a copy of agent-kit's template; a test keeps them equal) checks every command and edit. With `FOREMAN_ACTOR` set, edits must stay inside your claimed task's `paths`.
 
