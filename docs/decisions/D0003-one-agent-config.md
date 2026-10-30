@@ -1,6 +1,6 @@
 # D0003. One agent config, generated for Claude Code and Codex; hard limits enforced outside the agent (2026-10-30)
 
-**Status:** Active
+**Status:** Amended by D0005
 
 **Context:** [R2 Claude Code and Codex](../research/R2-claude-code-codex.md).
 

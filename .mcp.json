@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "foreman": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["packages/foreman/src/cli.ts", "mcp"]
+    }
+  }
+}

@@ -1,11 +1,22 @@
 # meta-repo
 
-A starter for projects where AI coding agents (Claude Code, Codex) write most of the code: agent docs, guardrails, CI, test and design kits, and a task layer ("foreman") that turns requests into agent work and tracks it to sign-off.
+A starter for projects where AI coding agents (Claude Code; other tools later, see D0005) write most of the code: agent docs, guardrails, CI, test and design kits, and a task layer ("foreman") that turns requests into agent work and tracks it to sign-off.
 
 ## Where things are
 - `docs/research-plan.md`: the plan. Tracks R1–R8, steps M0–M8, each gated by a check.
 - `docs/decisions/`: one file per decision, `Dnnnn-short-slug.md`.
 - `docs/research/`: findings, one file per track (`R5.md`), written when the track's check runs.
+- `packages/foreman/`: the task layer ([README](packages/foreman/README.md)).
+
+## Commands
+- `bun install`, then `bun run check` (typecheck + tests). CI runs the same command.
+
+## Tasks
+Work on this repo is tracked in foreman itself (MCP server `foreman` in `.mcp.json`, or `bun packages/foreman/src/cli.ts`).
+- Before starting: `next_tasks`, then `claim_task`. Report with `report_progress`, hand in with `submit_task` and the PR.
+- Found other work on the way: `create_task` with `discoveredFrom`. Search `list_tasks` first.
+- Never verify your own task, and never approve: people sign off.
+- New decision file: get its number from `reserve_number` (kind `decision`).
 
 ## Rules
 - Research before building: don't build a step until its track's check has passed and the decision is recorded.

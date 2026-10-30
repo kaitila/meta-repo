@@ -20,3 +20,15 @@ jobs:
           # Offline: only links inside the repo, so the check never fails on someone else's site.
           args: --offline --no-progress --include-fragments './**/*.md'
           fail: true
+
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+      - run: bun install --frozen-lockfile
+      # The same command agents and people run locally (D0004).
+      - run: bun run check
