@@ -10,6 +10,7 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 - `packages/agent-kit/`: guardrail baseline and templates ([README](packages/agent-kit/README.md)). This repo runs its own baseline (`.claude/settings.json`).
 
 ## Commands
+- Test Postgres (once): `docker run -d --name metarepo-pg -e POSTGRES_USER=metarepo -e POSTGRES_PASSWORD=metarepo -p 127.0.0.1:5544:5432 postgres:16 -c fsync=off`. Database tests skip without it locally and fail without it on CI.
 - `bun install`, then `bun run check` (typecheck + tests). `bun run link` once makes the foreman CLI available as `fm`. CI runs the same command, plus `bun audit`, gitleaks and zizmor.
 - `rm -rf` is denied here: use the tool's own clean command (e.g. `bun install --force`) or ask.
 - A guard hook (`.claude/hooks/guard.ts`, a copy of agent-kit's template; a test keeps them equal) checks every command and edit. With `FOREMAN_ACTOR` set, edits must stay inside your claimed task's `paths`.
