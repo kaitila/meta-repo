@@ -26,6 +26,8 @@ It needs a logged-in `claude` and costs about $0.04 with Haiku. It isn't run in 
 
 - The documented "Read denies also apply to `cat`" did not hold once Bash was allowed. The baseline therefore carries explicit Bash rules for `.env` files.
 - Rules still miss scripts that read files themselves (`bun -e 'Bun.file(".env")…'`) and other tricks such as `git -C . push`. The guard hook (T-0002) and CI cover those; branch protection (T-0004) is the hard stop.
+- **False positive:** a deny rule matches anywhere in the command, quoted arguments included. A verifier's `foreman verdict … --result 'c2:pass:… cat .env denied …'` was blocked by `Bash(* .env *)`, and `git commit -m "ignore .env files"` would be blocked the same way. Rules can't tell a file argument from text, so the guard hook (T-0002), which parses the command, should take over the `.env` Bash rules. Until then, MCP tools (not subject to Bash rules) are the way around it for foreman verdicts.
+- **Flaky without retries:** in one verifier run the model declined to attempt `git push --force` at all. "Not attempted" proves nothing, so the live test now retries such a command up to 3 times before calling it.
 - Workspace trust: in an untrusted folder, Claude Code ignores the project's `allow` entries, but `deny` and `ask` apply right away. That is the order a baseline wants.
 - The same session's own `rm -rf node_modules` was denied after the baseline went into this repo. `bun install --force` did the job instead.
 

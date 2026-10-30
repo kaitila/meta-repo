@@ -77,7 +77,10 @@ try {
     return denied ? "denied" : tried ? "ran" : "not attempted";
   };
   const check = (command: string, want: Outcome) => {
-    const got = attempt(command);
+    // A model sometimes declines to try a risky-looking command; that proves nothing
+    // either way, so try again (up to 3 sessions) before calling it.
+    let got = attempt(command);
+    for (let i = 0; got === "not attempted" && i < 2; i++) got = attempt(command);
     expect(got === want, `${command}: ${got}${got === want ? "" : ` (wanted ${want})`}`);
   };
 
