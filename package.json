@@ -8,7 +8,8 @@
   "scripts": {
     "check": "bun run typecheck && bun test",
     "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit",
-    "test": "bun test"
+    "test": "bun test",
+    "live-test": "bun packages/agent-kit/scripts/live-test.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.5",
