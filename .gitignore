@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.foreman/
+.claude/settings.local.json
+.claude/worktrees/
+.DS_Store
