@@ -1,6 +1,6 @@
 # meta-repo
 
-A starter for new projects where most of the code is written by AI coding agents (Claude Code, Codex).
+A starter for new projects where most of the code is written by AI coding agents (Claude Code for now).
 
 It packages patterns proven in a production codebase that was written mostly by agents:
 - short agent docs

@@ -1,0 +1,215 @@
+#!/usr/bin/env bun
+// foreman CLI. Agents and people use the same verbs; --json on every command.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+import {
+  actorFromEnv,
+  type CheckResult,
+  Foreman,
+  ForemanError,
+  type Status,
+  type Task,
+} from "./core";
+import { toMarkdown } from "./export";
+
+const HELP = `foreman: a task layer for AI coding agents in parallel git worktrees
+
+Usage: foreman <command> [args] [--json]
+
+Tasks
+  add <title> [--spec md] [--check "cmd: bun test"]... [--path glob]... [--risk auto|review|human]
+              [--parent T-1] [--blocked-by T-2]... [--from T-3] [--ready]
+  ready-up <id>                 draft -> ready (needs at least one check)
+  list [--status s]... [--mine]
+  next                          ready tasks whose blockers are done
+  show <id>                     task, checks and history
+  cancel <id> --reason text
+
+Working (worker)
+  claim [id] [--lease min]      claim a task, or the next ready one
+  heartbeat <id>                keep the claim alive
+  progress <id> [--note text] [--branch b] [--worktree path]
+  submit <id> --pr url [--summary text]
+
+Verifying (anyone who didn't work on it)
+  verify <id>                   take the task for verification
+  verdict <id> --result 'c1:pass:evidence' ...   or  --results-json file|-
+
+Signing off
+  approve <id> [--note text]    people only
+  merged <id> [--pr url]
+
+Housekeeping
+  reclaim                       release claims whose lease ran out
+  reserve <kind> [--task id]    next free number (kind "decision" also reads docs/decisions)
+  export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
+  mcp                           run the MCP server on stdio
+
+Who you are: FOREMAN_ACTOR names you; CLAUDECODE=1 or FOREMAN_AGENT=1 marks you as an agent.
+State: <main checkout>/.foreman/foreman.db, or FOREMAN_DB.`;
+
+function line(t: Task): string {
+  const who = t.assignee ? ` @${t.assignee}` : "";
+  return `${t.id}  ${t.status.padEnd(14)} ${t.risk.padEnd(6)} ${t.title}${who}`;
+}
+
+function parseResult(s: string): CheckResult {
+  const m = /^([^:]+):(pass|fail):(.*)$/s.exec(s);
+  if (!m) throw new ForemanError("invalid", `--result must be check:pass|fail:evidence, got "${s}"`);
+  return { check: m[1]!.trim(), pass: m[2] === "pass", evidence: m[3]!.trim() };
+}
+
+/** Returns the exit code, or null when the process must keep running (the MCP server). */
+export async function main(argv: string[]): Promise<number | null> {
+  const { values: o, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: {
+      json: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+      spec: { type: "string" },
+      check: { type: "string", multiple: true },
+      path: { type: "string", multiple: true },
+      risk: { type: "string" },
+      parent: { type: "string" },
+      "blocked-by": { type: "string", multiple: true },
+      from: { type: "string" },
+      ready: { type: "boolean" },
+      status: { type: "string", multiple: true },
+      mine: { type: "boolean" },
+      lease: { type: "string" },
+      note: { type: "string" },
+      branch: { type: "string" },
+      worktree: { type: "string" },
+      pr: { type: "string" },
+      summary: { type: "string" },
+      result: { type: "string", multiple: true },
+      "results-json": { type: "string" },
+      reason: { type: "string" },
+      task: { type: "string" },
+      out: { type: "string" },
+    },
+  });
+  const [cmd, ...args] = positionals;
+  if (!cmd || o.help || cmd === "help") {
+    console.log(HELP);
+    return 0;
+  }
+  if (cmd === "mcp") {
+    const { serve } = await import("./mcp");
+    await serve();
+    return null;
+  }
+
+  const f = Foreman.open();
+  const me = actorFromEnv();
+  const lease = o.lease ? Number(o.lease) : undefined;
+  const need = (i: number, what: string) => {
+    const v = args[i];
+    if (!v) throw new ForemanError("invalid", `missing ${what}`);
+    return v;
+  };
+  const out = (value: unknown, text: string) => console.log(o.json ? JSON.stringify(value, null, 2) : text);
+  const one = (t: Task) => out(t, line(t));
+
+  switch (cmd) {
+    case "add": {
+      const risk = (o.risk ?? "review") as Task["risk"];
+      if (!["auto", "review", "human"].includes(risk)) throw new ForemanError("invalid", `bad risk ${risk}`);
+      const t = f.create(
+        {
+          title: args.join(" "),
+          spec: o.spec,
+          acceptance: o.check,
+          paths: o.path,
+          risk,
+          parent: o.parent,
+          blockedBy: o["blocked-by"],
+          discoveredFrom: o.from,
+          ready: o.ready,
+        },
+        me,
+      );
+      return one(t), 0;
+    }
+    case "ready-up":
+      return one(f.markReady(need(0, "task id"), me)), 0;
+    case "list": {
+      const ts = f.list({ status: o.status as Status[] | undefined, assignee: o.mine ? me.name : undefined });
+      return out(ts, ts.map(line).join("\n") || "no tasks"), 0;
+    }
+    case "next": {
+      const ts = f.ready(me.kind);
+      return out(ts, ts.map(line).join("\n") || "nothing ready"), 0;
+    }
+    case "show": {
+      const t = f.get(need(0, "task id"));
+      const ev = f.events(t.id);
+      return out({ ...t, events: ev }, toMarkdown(t, ev)), 0;
+    }
+    case "cancel":
+      return one(f.cancel(need(0, "task id"), me, o.reason ?? "")), 0;
+    case "claim":
+      return one(f.claim(args[0] ?? null, me, lease)), 0;
+    case "heartbeat":
+      return one(f.heartbeat(need(0, "task id"), me, lease)), 0;
+    case "progress":
+      return one(f.progress(need(0, "task id"), me, { note: o.note, branch: o.branch, worktree: o.worktree })), 0;
+    case "submit":
+      return one(f.submit(need(0, "task id"), me, { pr: o.pr ?? "", summary: o.summary })), 0;
+    case "verify":
+      return one(f.startVerify(need(0, "task id"), me, lease)), 0;
+    case "verdict": {
+      let results: CheckResult[] = (o.result ?? []).map(parseResult);
+      const rj = o["results-json"];
+      if (rj) {
+        const text = rj === "-" ? await Bun.stdin.text() : await Bun.file(rj).text();
+        results = JSON.parse(text);
+      }
+      return one(f.recordVerify(need(0, "task id"), me, results)), 0;
+    }
+    case "approve": {
+      if (!process.stdin.isTTY) {
+        throw new ForemanError("human_only", "approve runs only in an interactive terminal");
+      }
+      return one(f.approve(need(0, "task id"), me, o.note)), 0;
+    }
+    case "merged":
+      return one(f.merged(need(0, "task id"), me, o.pr)), 0;
+    case "reclaim": {
+      const ids = f.reclaim(me);
+      return out(ids, ids.length ? `released ${ids.join(", ")}` : "no expired claims"), 0;
+    }
+    case "reserve": {
+      const n = f.reserve(need(0, "kind"), me, o.task);
+      const label = args[0] === "decision" ? `D${String(n).padStart(4, "0")}` : String(n);
+      return out({ kind: args[0], value: n, label }, label), 0;
+    }
+    case "export": {
+      const t = f.get(need(0, "task id"));
+      const dir = o.out ?? join(f.root ?? ".", "docs", "tasks");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${t.id}.md`);
+      writeFileSync(file, toMarkdown(t, f.events(t.id)));
+      return out({ file }, file), 0;
+    }
+    default:
+      throw new ForemanError("invalid", `unknown command "${cmd}" (foreman help)`);
+  }
+}
+
+if (import.meta.main) {
+  main(process.argv.slice(2))
+    .then((code) => {
+      if (code !== null) process.exit(code);
+    })
+    .catch((e) => {
+      if (e instanceof ForemanError) {
+        if (process.argv.includes("--json")) console.error(JSON.stringify({ error: e.code, message: e.message }));
+        else console.error(`foreman: ${e.message}`);
+        process.exit(1);
+      }
+      throw e;
+    });
+}

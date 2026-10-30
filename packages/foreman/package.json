@@ -1,0 +1,13 @@
+{
+  "name": "@meta-repo/foreman",
+  "version": "0.1.0",
+  "description": "Local task layer for AI coding agents working in parallel git worktrees",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "foreman": "src/cli.ts" },
+  "exports": { ".": "./src/core.ts" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "zod": "3.25.76"
+  }
+}
