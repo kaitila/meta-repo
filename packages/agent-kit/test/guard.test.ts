@@ -130,11 +130,14 @@ describe("task paths", () => {
   });
 });
 
-test("the copy this repo runs is the template", () => {
+test("the copies this repo runs are the templates (all but settings.json, which merges)", () => {
   const root = join(import.meta.dir, "..", "..", "..");
-  expect(readFileSync(join(root, ".claude/hooks/guard.ts"), "utf8")).toBe(
-    readFileSync(join(import.meta.dir, "..", "templates/.claude/hooks/guard.ts"), "utf8"),
-  );
+  const templates = join(import.meta.dir, "..", "templates");
+  const files = [...new Bun.Glob(".claude/**/*").scanSync({ cwd: templates, dot: true, onlyFiles: true })];
+  expect(files.length).toBeGreaterThan(5);
+  for (const f of files.filter((x) => !x.endsWith("settings.json"))) {
+    expect(readFileSync(join(root, f), "utf8")).toBe(readFileSync(join(templates, f), "utf8"));
+  }
 });
 
 describe("shell writes and task paths (T-0013)", () => {
