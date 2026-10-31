@@ -90,7 +90,7 @@ describe("init", () => {
     };
     const dir = repo(mine);
     const changes = init(dir);
-    for (const [f, text] of Object.entries(mine)) if (f !== ".claude/settings.json") expect(read(dir, f), f).toBe(text);
+    for (const [f, text] of Object.entries(mine)) if (f !== ".claude/settings.json" && f !== "CLAUDE.md") expect(read(dir, f), f).toBe(text);
 
     const settings = JSON.parse(read(dir, ".claude/settings.json"));
     expect(settings.model).toBe("x");
@@ -100,7 +100,8 @@ describe("init", () => {
     expect(existsSync(join(dir, ".claude/hooks/guard.ts"))).toBe(true);
     expect(read(dir, "docs/decisions/D0001-agent-kit.md")).toMatch(/^# D0001\. .+ \(\d{4}-\d{2}-\d{2}\)\n\n\*\*Status:\*\* Active/);
     expect(existsSync(join(dir, ".github/workflows/ci.yml"))).toBe(false);
-    expect(changes).toContainEqual(expect.objectContaining({ action: "skipped", path: "CLAUDE.md" }));
+    expect(read(dir, "CLAUDE.md")).toBe("Our own notes.\n@AGENTS.md\n");
+    expect(changes).toContainEqual(expect.objectContaining({ action: "merged", path: "CLAUDE.md" }));
 
     const rec = readInstalled(dir)!;
     expect(rec.files[".claude/hooks/guard.ts"]).toBeDefined();
@@ -108,6 +109,17 @@ describe("init", () => {
 
     expect(() => init(dir)).toThrow("already there");
     expect(() => init(fresh())).toThrow("not a git repository");
+  });
+
+  test("appends @AGENTS.md to CLAUDE.md once, and only when it's missing", () => {
+    const noNewline = repo({ "CLAUDE.md": "Notes" });
+    init(noNewline);
+    expect(read(noNewline, "CLAUDE.md")).toBe("Notes\n@AGENTS.md\n");
+
+    const importing = repo({ "CLAUDE.md": "Intro\n@AGENTS.md\nMore" });
+    const changes = init(importing);
+    expect(read(importing, "CLAUDE.md")).toBe("Intro\n@AGENTS.md\nMore");
+    expect(changes.some((c) => c.path === "CLAUDE.md" && c.action === "merged")).toBe(false);
   });
 
   test("writes the skeletons, and a CI workflow only when there's a check script to run", () => {

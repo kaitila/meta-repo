@@ -21,7 +21,7 @@ Makes a new project in an empty or missing folder:
 ## init
 Adds the kit to a git repository and **never overwrites a file it has**:
 - **agent-kit's templates.** An existing `.claude/settings.json` gets the baseline's rules merged in, and its own rules and keys are kept (D0014).
-- **`AGENTS.md` and `CLAUDE.md` skeletons**, if missing. A `CLAUDE.md` that doesn't import `AGENTS.md` is reported, not changed.
+- **`AGENTS.md` and `CLAUDE.md` skeletons**, if missing. A `CLAUDE.md` that doesn't import `AGENTS.md` gets a line `@AGENTS.md` appended (once; the rest is kept).
 - **`docs/decisions/D0001-agent-kit.md`**, if the repo has no decision files yet. <!-- docs-check: elsewhere -->
 - **`foreman.json`**, if missing.
 - **A CI workflow** (`.github/workflows/ci.yml`, runs `bun run check`), only if the repo has no workflow and `package.json` has a `check` script, so it can pass.
