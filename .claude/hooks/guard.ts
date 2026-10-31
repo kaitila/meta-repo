@@ -221,7 +221,22 @@ function substitutions(text: string): string[] {
   return out;
 }
 
-/** Drop `VAR=value` prefixes and wrappers such as `sudo`, `timeout 10`, `env -i`. */
+// Wrapper options that take the next word as their value (`env -u NAME`, `sudo -u root`),
+// so that word isn't mistaken for the command. Short ones also take it attached (`-uNAME`).
+const WRAPPER_VALUE_OPTS: Record<string, string[]> = {
+  env: ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
+  sudo: ["-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role", "-t", "--type", "-T", "--command-timeout", "-U", "--other-user"],
+  nice: ["-n", "--adjustment"],
+  timeout: ["-s", "--signal", "-k", "--kill-after"],
+  stdbuf: ["-i", "--input", "-o", "--output", "-e", "--error"],
+  xargs: ["-a", "--arg-file", "-d", "--delimiter", "-E", "-e", "-I", "-i", "-L", "-l", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars", "--process-slot-var"],
+  time: ["-f", "--format", "-o", "--output"],
+  exec: ["-a"],
+};
+// Short options whose value may be left out, so `-i`/`-e`/`-l` alone take nothing.
+const OPTIONAL_VALUE = new Set(["xargs -i", "xargs -e", "xargs -l"]);
+
+/** Drop `VAR=value` prefixes and wrappers such as `sudo`, `timeout 10`, `env -u NAME`. */
 function unwrap(words: string[]): string[] {
   let w = [...words];
   for (;;) {
@@ -229,7 +244,33 @@ function unwrap(words: string[]): string[] {
     const head = w[0] ? basename(w[0]) : "";
     if (!WRAPPERS.has(head)) return w;
     w.shift();
-    while (w.length && (w[0]!.startsWith("-") || /^\d+[smhd]?$/.test(w[0]!))) w.shift();
+    const valued = WRAPPER_VALUE_OPTS[head] ?? [];
+    while (w.length && w[0]!.startsWith("-") && w[0] !== "-") {
+      const a = w.shift()!;
+      if (a === "--") break;
+      let name: string | undefined;
+      let inline: string | undefined;
+      if (a.startsWith("--")) {
+        const eq = a.indexOf("=");
+        name = eq < 0 ? a : a.slice(0, eq);
+        inline = eq < 0 ? undefined : a.slice(eq + 1);
+        if (!valued.includes(name)) continue;
+      } else {
+        // A cluster (`-Eu root`, `-iuX`): the first letter that takes a value takes the rest, or the next word.
+        for (let k = 1; k < a.length; k++) {
+          if (!valued.includes(`-${a[k]}`)) continue;
+          name = `-${a[k]}`;
+          inline = k + 1 < a.length ? a.slice(k + 1) : undefined;
+          break;
+        }
+        if (!name) continue;
+        if (OPTIONAL_VALUE.has(`${head} ${name}`)) continue; // `-i` alone; `-iX` carries its value inline
+      }
+      const value = inline ?? w.shift() ?? "";
+      // `env -S 'git push -f'` runs its value as the command line.
+      if (head === "env" && (name === "-S" || name === "--split-string")) w = [...(parseShell(value)[0] ?? []), ...w];
+    }
+    if (head === "timeout" && w.length && /^\d+(\.\d+)?[smhd]?$/.test(w[0]!)) w.shift(); // the duration
   }
 }
 
@@ -356,6 +397,8 @@ export function writeTargets(head: string, args: string[]): string[] {
     args.forEach((a, k) => {
       if ((a === long || new RegExp(`^-[A-Za-z]*${short}$`).test(a)) && args[k + 1] && args[k + 1] !== "-") out.push(args[k + 1]!);
       else if (a.startsWith(`${long}=`)) out.push(a.slice(long.length + 1));
+      // Attached value: `-ofile` (curl), `-Ofile` (wget).
+      else if (a.length > 2 && a.startsWith(`-${short}`)) out.push(a.slice(2));
     });
     return out;
   }
@@ -409,6 +452,15 @@ export function gitWriteTargets(args: string[]): string[] {
 }
 
 /** Does this shell or interpreter read its script from stdin (so a heredoc fed to it is code)? */
+/** Options of shells and interpreters whose next word is their value, not a script. */
+const VALUE_OPTIONS = new Set([
+  "-o", "-O", "+o", "+O", "--rcfile", "--init-file", // shells
+  "-r", "--require", "--import", "--loader", "--experimental-loader", "--env-file", "--conditions", "-C", // node
+  "--preload", "--cwd", "--config", "--tsconfig-override", // bun
+  "-W", "-X", // python
+  "-I", "-M", // perl, ruby
+]);
+
 function readsScriptFromStdin(head: string, args: string[]): boolean {
   if (args.some((a) => ["-c", "-e", "-E", "--eval", "-p", "--print", "-m"].includes(a))) return false; // code or module given
   if (args.includes("-s") || args.includes("-")) return true;
@@ -416,7 +468,9 @@ function readsScriptFromStdin(head: string, args: string[]): boolean {
   // value (`bash -o pipefail`, `python3 -W ignore`), so the heredoc is treated as code:
   // when unsure, check it (verifier finding on T-0027).
   const looksLikeScript = (a: string) => !a.startsWith("-") && (a.includes("/") || /\.(sh|bash|zsh|py|js|mjs|cjs|ts|tsx|rb|pl|php)$/.test(a));
-  return !args.some(looksLikeScript);
+  // The value of an option that takes one (`--rcfile ./rc`, `--require ./x.js`) isn't the script.
+  const plain = args.filter((a, k) => !VALUE_OPTIONS.has(args[k - 1] ?? ""));
+  return !plain.some(looksLikeScript);
 }
 
 function inlineCode(head: string, args: string[]): string[] {
@@ -469,6 +523,7 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
       return "inline code reads a .env file";
     }
   }
+  // `cd DIR && ...`: later commands run in DIR, for branch checks and relative paths.
   for (const { words: raw, writes } of commands) {
     for (const target of writes) {
       const r = editRule(target, ctx);
@@ -476,6 +531,36 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
     }
     const words = unwrap(raw);
     if (!words.length) continue;
+    const head0 = basename(words[0]!);
+    if (head0 === "cd" || head0 === "pushd") {
+      const to = words.slice(1).find((a) => !a.startsWith("-"));
+      // No argument or `cd -` goes somewhere we can't know: keep the outer cwd's rules.
+      if (to && to !== "-") ctx = { ...ctx, cwd: isAbsolute(to) ? to : resolve(ctx.cwd, to) };
+      continue;
+    }
+    if (head0 === "find") {
+      // The command after -exec/-execdir/-ok runs on found files: check its own writes too.
+      const args0 = words.slice(1);
+      for (let k = 0; k < args0.length; k++) {
+        if (!["-exec", "-execdir", "-ok", "-okdir"].includes(args0[k]!)) continue;
+        const seg: string[] = [];
+        for (k++; k < args0.length && args0[k] !== ";" && args0[k] !== "+" && args0[k] !== "\\;"; k++) seg.push(args0[k]!);
+        if (!seg.length) continue;
+        const h = basename(seg[0]!);
+        // `{}` is each found file: a path under the first start directory.
+        const firstStart = args0.find((a) => !a.startsWith("-") && a !== "(" && a !== "!") ?? ".";
+        const rest = seg.slice(1).map((a) => (a === "{}" ? `${firstStart.replace(/\/$/, "")}/_` : a));
+        const r =
+          (h === "rm" ? rmRule(rest) : null) ??
+          (h === "git" ? gitRule(rest, ctx) : null) ??
+          (h === "git" ? gitWriteTargets(rest) : writeTargets(h, rest)).map((t) => editRule(t, ctx)).find((x) => x) ??
+          null;
+        if (r) return r;
+      }
+    }
+    // `--env-file=.env` and other `--option=value` forms: a .env value is still a .env read.
+    const assigned = words.slice(1).find((a) => /^--?[A-Za-z][\w-]*=/.test(a) && isEnvFile(a.slice(a.indexOf("=") + 1)));
+    if (assigned) return `${assigned.slice(assigned.indexOf("=") + 1)} holds secrets: agents don't read or copy it`;
     const head = basename(words[0]!);
     const args = words.slice(1);
     if (head === "git") {

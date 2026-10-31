@@ -49,13 +49,63 @@ export function remoteRepo(url: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/**
+ * Where the numbers of a kind already in use are written down, so `reserve` hands out
+ * the next one. `file`: the pattern runs over that file's text (multiline). `glob`: it
+ * runs over the name of each file the glob matches. Paths are relative to the repo root;
+ * the pattern's first capture group is the number.
+ */
+export type NumberSource = { file: string; pattern: string } | { glob: string; pattern: string };
+
+/** Used for a kind foreman.json doesn't list. */
+export const DEFAULT_NUMBERS: Record<string, NumberSource> = {
+  decision: { glob: "docs/decisions/*", pattern: "^D(\\d+)" },
+};
+
+interface Config {
+  protectedPaths?: string[];
+  numbers?: Record<string, NumberSource>;
+}
+
+function loadConfig(root: string | null): Config {
+  const file = root && join(root, "foreman.json");
+  return file && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Config) : {};
+}
+
 export function loadProtected(root: string | null): string[] {
-  if (!root) return DEFAULT_PROTECTED;
-  const file = join(root, "foreman.json");
-  if (!existsSync(file)) return DEFAULT_PROTECTED;
-  const cfg = JSON.parse(readFileSync(file, "utf8")) as { protectedPaths?: string[] };
+  const { protectedPaths } = loadConfig(root);
   // foreman.json guards itself, whatever it says.
-  return [...new Set([...(cfg.protectedPaths ?? DEFAULT_PROTECTED), "foreman.json"])];
+  return protectedPaths ? [...new Set([...protectedPaths, "foreman.json"])] : DEFAULT_PROTECTED;
+}
+
+/** The highest number of `kind` already on disk (0 if none, or no source for the kind). */
+export function highestOnDisk(root: string | null, kind: string): number {
+  if (!root) return 0;
+  const src = loadConfig(root).numbers?.[kind] ?? DEFAULT_NUMBERS[kind];
+  if (!src) return 0;
+  const where = `foreman.json numbers.${kind}`;
+  const hasFile = "file" in src && typeof src.file === "string";
+  const hasGlob = "glob" in src && typeof src.glob === "string";
+  if (hasFile === hasGlob) throw new Error(`${where}: give exactly one of "file" or "glob"`);
+  if (typeof src.pattern !== "string") throw new Error(`${where}: "pattern" must be a string`);
+  let re: RegExp;
+  try {
+    re = new RegExp(src.pattern, "gm");
+  } catch (e) {
+    throw new Error(`${where}: ${(e as Error).message}`);
+  }
+  // An empty alternative always matches, so the result's length counts the groups.
+  if (new RegExp(`${src.pattern}|`).exec("")!.length < 2) throw new Error(`${where}: "pattern" needs a capture group`);
+  let texts: string[];
+  if ("file" in src) {
+    const f = join(root, src.file);
+    texts = existsSync(f) ? [readFileSync(f, "utf8")] : [];
+  } else {
+    texts = [...new Bun.Glob(src.glob).scanSync({ cwd: root })].map((p) => p.split("/").pop()!);
+  }
+  let max = 0;
+  for (const t of texts) for (const m of t.matchAll(re)) if (m[1]) max = Math.max(max, Number(m[1]));
+  return max;
 }
 
 export function isProtected(file: string, protectedPaths: string[]): boolean {
