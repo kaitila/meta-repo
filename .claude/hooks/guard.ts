@@ -148,6 +148,7 @@ export function parseCommands(src: string): SimpleCommand[] {
         inWord = false;
       } else endWord();
       while (src[i + 1] === ">") i++;
+      if (src[i + 1] === "|") i++; // ">|": write even with noclobber
       if (src[i + 1] === "&") {
         i++;
         while (/[\d-]/.test(src[i + 1] ?? "")) i++;
@@ -322,14 +323,41 @@ function rmRule(args: string[]): string | null {
 /** Files a command writes to, for the commands that commonly write files. */
 export function writeTargets(head: string, args: string[]): string[] {
   const plain = (xs: string[]) => xs.filter((a) => !a.startsWith("-"));
-  if (head === "tee" || head === "touch") return plain(args);
+  // Creating, emptying or deleting a file is writing it.
+  if (["tee", "touch", "rm", "unlink", "rmdir", "mkdir", "shred"].includes(head)) return plain(args);
+  if (head === "truncate") return plain(args.filter((a, k) => !(args[k - 1] === "-s" || args[k - 1] === "--size")));
   if (head === "cp" || head === "mv" || head === "install" || head === "ln") {
-    const t = args.findIndex((a) => a === "-t" || a === "--target-directory");
-    if (t >= 0 && args[t + 1]) return [args[t + 1]!];
+    // -t DIR, also at the end of a flag cluster ("-rt DIR", "-vt DIR").
+    const t = args.findIndex((a) => a === "--target-directory" || /^-[A-Za-z]*t$/.test(a));
     const longT = args.find((a) => a.startsWith("--target-directory="));
-    if (longT) return [longT.split("=")[1]!];
-    const rest = plain(args);
-    return rest.length >= 2 ? [rest[rest.length - 1]!] : [];
+    const rest = plain(args.filter((_, k) => k !== t + 1 || t < 0));
+    // mv also takes its sources away: they're written too.
+    const moved = head === "mv" ? rest : [];
+    if (t >= 0 && args[t + 1]) return [args[t + 1]!, ...moved];
+    if (longT) return [longT.split("=")[1]!, ...moved];
+    if (rest.length < 2) return [];
+    return head === "mv" ? rest : [rest[rest.length - 1]!];
+  }
+  if (head === "dd") return args.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+  if (head === "find" && args.some((a) => a === "-delete" || a === "-exec" || a === "-execdir" || a === "-ok")) {
+    // find deletes or runs commands under its start directories (the words before the first expression).
+    const start: string[] = [];
+    for (const a of args) {
+      if (a.startsWith("-") || a === "(" || a === "!" || a === "\\(") break;
+      start.push(a);
+    }
+    return start.length ? start : ["."];
+  }
+  if (head === "curl" || head === "wget") {
+    // curl -o FILE / --output FILE / -sSLo FILE; wget -O FILE / --output-document FILE.
+    const short = head === "curl" ? "o" : "O";
+    const long = head === "curl" ? "--output" : "--output-document";
+    const out: string[] = [];
+    args.forEach((a, k) => {
+      if ((a === long || new RegExp(`^-[A-Za-z]*${short}$`).test(a)) && args[k + 1] && args[k + 1] !== "-") out.push(args[k + 1]!);
+      else if (a.startsWith(`${long}=`)) out.push(a.slice(long.length + 1));
+    });
+    return out;
   }
   if (head === "sed" && args.some((a) => a === "-i" || a.startsWith("-i") || a.startsWith("--in-place"))) {
     // The script is the first plain word unless given with -e/-f.
@@ -348,6 +376,47 @@ export function writeTargets(head: string, args: string[]): string[] {
     return out;
   }
   return [];
+}
+
+/** Files git changes in the working tree: `git rm`, `git mv`, `git checkout -- x`, `git restore x`. */
+export function gitWriteTargets(args: string[]): string[] {
+  let i = 0;
+  for (; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "-C" || a === "-c" || a === "--git-dir" || a === "--work-tree" || a === "--namespace") i++;
+    else if (!a.startsWith("-")) break;
+  }
+  const sub = args[i];
+  const rest = args.slice(i + 1);
+  const plain = rest.filter((a) => !a.startsWith("-"));
+  if (sub === "rm" || sub === "mv") return plain;
+  if (sub === "checkout") {
+    const dd = rest.indexOf("--");
+    if (dd >= 0) return rest.slice(dd + 1);
+    // `git checkout <ref> <path>...`: everything after the ref is a path. A single word is
+    // most often a branch to switch to, which writes no file of its own.
+    const vals = new Set(["-b", "-B", "--orphan"]);
+    const words = rest.filter((a, k) => !a.startsWith("-") && !vals.has(rest[k - 1] ?? ""));
+    return words.length >= 2 ? words.slice(1) : [];
+  }
+  if (sub === "restore") {
+    // --staged alone touches only the index, not files.
+    if (rest.includes("--staged") && !rest.includes("--worktree") && !rest.includes("-W")) return [];
+    const vals = new Set(["-s", "--source"]);
+    return rest.filter((a, k) => !a.startsWith("-") && !vals.has(rest[k - 1] ?? "") && a !== "--");
+  }
+  return [];
+}
+
+/** Does this shell or interpreter read its script from stdin (so a heredoc fed to it is code)? */
+function readsScriptFromStdin(head: string, args: string[]): boolean {
+  if (args.some((a) => ["-c", "-e", "-E", "--eval", "-p", "--print", "-m"].includes(a))) return false; // code or module given
+  if (args.includes("-s") || args.includes("-")) return true;
+  // Only a word that looks like a script file names one. Anything else may be an option's
+  // value (`bash -o pipefail`, `python3 -W ignore`), so the heredoc is treated as code:
+  // when unsure, check it (verifier finding on T-0027).
+  const looksLikeScript = (a: string) => !a.startsWith("-") && (a.includes("/") || /\.(sh|bash|zsh|py|js|mjs|cjs|ts|tsx|rb|pl|php)$/.test(a));
+  return !args.some(looksLikeScript);
 }
 
 function inlineCode(head: string, args: string[]): string[] {
@@ -381,8 +450,12 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
   });
   const bodies = commands.flatMap((c) => c.heredocs);
   if (bodies.length) {
+    // Only a shell or interpreter that reads its script from stdin runs the body:
+    // `bash script.sh <<EOF` and `python3 x.py <<EOF` feed it data (T-0027).
     const runsStdin = heads.some(
-      (h) => (SHELLS.has(h.head) && !h.args.includes("-c")) || ((h.head === "source" || h.head === ".") && h.args[0] === "/dev/stdin"),
+      (h) =>
+        (SHELLS.has(h.head) && readsScriptFromStdin(h.head, h.args)) ||
+        ((h.head === "source" || h.head === ".") && h.args[0] === "/dev/stdin"),
     );
     if (runsStdin) {
       for (const body of bodies) {
@@ -390,8 +463,11 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
         if (r) return r;
       }
     }
-    // An interpreter fed a heredoc (`python3 <<EOF`) runs it as code we can't parse: scan it like `-e` code.
-    if (heads.some((h) => INTERPRETERS.has(h.head)) && bodies.some(codeReadsEnv)) return "inline code reads a .env file";
+    // An interpreter fed a heredoc as its script (`python3 <<EOF`, `cat <<EOF | node`) runs code
+    // we can't parse: scan it like `-e` code.
+    if (heads.some((h) => INTERPRETERS.has(h.head) && readsScriptFromStdin(h.head, h.args)) && bodies.some(codeReadsEnv)) {
+      return "inline code reads a .env file";
+    }
   }
   for (const { words: raw, writes } of commands) {
     for (const target of writes) {
@@ -421,7 +497,7 @@ export function checkCommand(command: string, ctx: Context, depth = 0): string |
     for (const code of inlineCode(head, args)) {
       if (codeReadsEnv(code)) return "inline code reads a .env file";
     }
-    for (const target of writeTargets(head, args)) {
+    for (const target of head === "git" ? gitWriteTargets(args) : writeTargets(head, args)) {
       const r = editRule(target, ctx);
       if (r) return r;
     }
@@ -444,7 +520,8 @@ function editRule(path: string, ctx: Context): string | null {
     return `can't check your task's paths: ${(e as Error).message}`;
   }
   if (!paths || paths.length === 0) return null;
-  const ok = [...paths, ...ALWAYS_EDITABLE].some((g) => new Bun.Glob(g).match(rel));
+  // A directory (cp -t DIR, mkdir DIR) is inside the paths when what goes into it would be.
+  const ok = [...paths, ...ALWAYS_EDITABLE].some((g) => new Bun.Glob(g).match(rel) || new Bun.Glob(g).match(`${rel.replace(/\/$/, "")}/_`));
   return ok ? null : `${rel} is outside your task's paths (${paths.join(", ")}); file a task for it instead`;
 }
 
