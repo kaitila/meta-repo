@@ -119,6 +119,7 @@ async function openTask(id) {
   try { d = await get("/api/tasks/" + encodeURIComponent(id)); } catch (e) { return; }
   if (openId !== id) return;
   const t = d.task, p = $("#detail");
+  const typing = document.activeElement && document.activeElement.id === "token";
   p.replaceChildren();
   const close = el("button", "close", "Close");
   close.type = "button";
@@ -159,6 +160,8 @@ async function openTask(id) {
   }
   p.append(hl);
   p.hidden = false;
+  const inp = $("#token");
+  if (typing && inp) inp.focus();
 }
 function approveBox(id) {
   const box = el("div", "approve");
@@ -169,12 +172,16 @@ function approveBox(id) {
   const btn = el("button", "", "Approve " + id);
   btn.type = "button";
   const msg = el("div", "msg");
+  // Kept as typed, so a live refresh that rebuilds the panel doesn't lose it.
+  inp.addEventListener("input", () => { token = inp.value; });
   btn.addEventListener("click", async () => {
     msg.className = "msg"; msg.textContent = "Approving…";
-    const r = await fetch("/api/tasks/" + encodeURIComponent(id) + "/approve", { method: "POST", headers: { "x-foreman-token": inp.value.trim() } });
-    const body = await r.json().catch(() => ({}));
-    if (r.ok) { token = inp.value.trim(); msg.className = "msg ok"; msg.textContent = "Approved."; await refresh(); }
-    else { msg.className = "msg err"; msg.textContent = body.message || "refused"; }
+    try {
+      const r = await fetch("/api/tasks/" + encodeURIComponent(id) + "/approve", { method: "POST", headers: { "x-foreman-token": inp.value.trim() } });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) { msg.className = "msg ok"; msg.textContent = "Approved."; await refresh(); }
+      else { msg.className = "msg err"; msg.textContent = body.message || "refused"; }
+    } catch (e) { msg.className = "msg err"; msg.textContent = "couldn't reach the board: " + (e && e.message ? e.message : e); }
   });
   box.append(lab, inp, btn, msg);
   return box;
@@ -205,8 +212,8 @@ function setLive(on) {
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openId) closeTask(); });
 renderBoard(S.tasks);
-if (location.hash.length > 1) openTask(decodeURIComponent(location.hash.slice(1)));
 setTimeout(poll, 2000);
+if (location.hash.length > 1) { try { openTask(decodeURIComponent(location.hash.slice(1))); } catch {} }
 `;
 
 export function pageHtml(nonce: string, initial: unknown): string {

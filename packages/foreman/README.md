@@ -2,7 +2,7 @@
 
 A local task layer for AI coding agents working in parallel git worktrees. Tasks have acceptance checks. A worker claims a task, someone else verifies it, and sign-off depends on risk. There is no server, account or hosted service.
 
-Status: MVP (step M3). The dispatcher, the verifier launcher, the janitor and the web board come in M6. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
+Status: MVP (step M3), plus a local web board. The dispatcher, the verifier launcher and the janitor come in M6. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
 
 ## How it works
 
@@ -46,9 +46,28 @@ foreman edit T-0001 --add-path "docs/**"   # while working: the holder may only 
 foreman rework T-0001 --reason "gap found after the verdict"   # back to ready; verify again
 foreman reserve decision           # next free Dnnnn, so parallel PRs never clash
 foreman export T-0001              # docs/tasks/T-0001.md
+fm serve                           # web board on http://127.0.0.1:4499 (--port 0 picks a free one)
 ```
 
 Every command takes `--json`.
+
+## Board
+
+`fm serve [--port 4499]` runs a web board for the repo's tasks. It listens on 127.0.0.1 only and prints its URL and a one-time approve token to its own terminal. `--port 0` picks a free port.
+
+- **The page:** one lane per status, `draft` to `cancelled`. A card shows the id, title, risk and assignee. Click it for the spec, the acceptance checks with each one's latest verdict, the PR link and the history. `/#T-0001` opens that task. It polls for changes every 2 seconds.
+- **Offline:** CSS and JS are inline, with no external assets. It follows the system's dark or light mode and works at phone width.
+- **API** (read-only JSON):
+  - `GET /api/tasks`: all tasks.
+  - `GET /api/tasks/:id`: the task, its checks with the latest verdict, and its events.
+  - `GET /api/events?since=<id>`: events after that id.
+- **Approving:** `POST /api/tasks/:id/approve` is the one write. It needs the header `x-foreman-token: <token>`, and if the browser sends an `Origin` it must be the board's own; otherwise 403. The approver is `FOREMAN_ACTOR` or `USER`, as a person.
+- **From an agent:** started from an agent session (`CLAUDE_CODE_CHILD_SESSION=1` or `FOREMAN_AGENT=1`), or without an interactive terminal (stdin and stdout), the board prints no token and approving is off, because the agent would read the token from its own output. Like `approve`, this is a guardrail, not a boundary.
+- **Safety:**
+  - The token is 32 random bytes in hex. It never appears in a page or an API response.
+  - A request whose `Host` isn't `127.0.0.1:<port>` or `localhost:<port>` gets 421, which blocks DNS rebinding.
+  - Headers: a CSP of `default-src 'self'` with a per-response nonce for the inline script and style, `x-frame-options: DENY`, `referrer-policy: no-referrer`, `nosniff` and `no-store`.
+  - Task text reaches the page only through `textContent`. The initial state is JSON with `<`, `>` and `&` escaped.
 
 ## Agents
 
