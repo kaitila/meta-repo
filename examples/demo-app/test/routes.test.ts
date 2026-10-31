@@ -82,6 +82,20 @@ describe.skipIf(!dbReachable)("with a database", () => {
     expect(await testDb().count("items")).toBe(0);
   });
 
+  test("the page lists items newest first, escaped, under a strict CSP", async () => {
+    await call("POST", "/api/items", { json: { name: "older" } });
+    await call("POST", "/api/items", { json: { name: "<img src=x onerror=alert(1)>" } });
+    const r = await call("GET", "/");
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(r.headers.get("content-security-policy")).toContain("default-src 'none'");
+    const html = await r.text();
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain("<img");
+    expect(html.indexOf("onerror")).toBeLessThan(html.indexOf("older"));
+    expect(html).toContain(">2 items<");
+  });
+
   test("/healthz answers ok with the version", async () => {
     const r = await call("GET", "/healthz");
     expect(r.status).toBe(200);

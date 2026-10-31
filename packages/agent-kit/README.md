@@ -62,8 +62,9 @@ Live check: `bun run live-test` runs real headless Claude sessions against both 
   - It runs every `cmd` check itself and wants concrete evidence for each statement; a statement it can't confirm fails.
   - It checks the changed files against the task's `paths`.
   - It records one verdict per check, and lists weaknesses even when the checks pass.
-- **`templates/.claude/agents/`: `test-writer`, `docs-writer` and `reviewer`.**
+- **`templates/.claude/agents/`: `test-writer`, `docs-writer`, `reviewer` and `design-critic`.**
   - They split the work by path: only test-writer runs the tests, docs-writer only edits docs, and the reviewer is read-only (no edit tools).
+  - design-critic is read-only too, for UI changes. It reviews the changed pages against the project's `docs/design.md`. It screenshots them at phone and desktop width, light and dark, when playwright-core is installed; otherwise it reviews the served markup and styles. <!-- docs-check: elsewhere -->
   - None of them touches foreman: the worker owns the task.
 
 The templates name no stack or layout. They read the project's commands from the "Commands" section of `AGENTS.md`, and a test keeps them free of project names, decision numbers and stack-specific commands.

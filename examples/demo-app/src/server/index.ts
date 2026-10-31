@@ -4,9 +4,10 @@ import { env } from "../config";
 import { getDb } from "../db/client";
 import { ApiFailure, errorResponse, json, type Route } from "./context";
 import { itemRoutes } from "./routes/items";
+import { pageRoutes } from "./routes/page";
 
-/** Every API route. Add new route files here. */
-export const routes: Route[] = [...itemRoutes];
+/** Every route: the API, then the web page and its files. Add new route files here. */
+export const routes: Route[] = [...itemRoutes, ...pageRoutes];
 
 const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
