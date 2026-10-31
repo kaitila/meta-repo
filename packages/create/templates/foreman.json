@@ -1,0 +1,16 @@
+{
+  "$comment": "Paths whose changes need a person's approval even after a verifier passes them. Everything else merges on a passing verdict.",
+  "protectedPaths": [
+    ".claude/**",
+    "**/.claude/**",
+    ".github/**",
+    ".meta-repo/**",
+    "foreman.json",
+    "package.json",
+    "**/package.json",
+    "bun.lock",
+    "**/tsconfig*.json",
+    "AGENTS.md",
+    "CLAUDE.md"
+  ]
+}

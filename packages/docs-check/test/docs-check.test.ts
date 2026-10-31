@@ -195,6 +195,14 @@ describe("registries", () => {
     expect(k.some((x) => x.includes("OLD_KEY (in .env.example, never read)"))).toBe(true);
     expect(k.some((x) => x.includes("TEST_ONLY"))).toBe(false); // read only in tests: needn't be documented
   });
+  test("env: agent tooling under .claude/ isn't the app's config", () => {
+    const root = repo({
+      ".claude/hooks/guard.ts": "process.env.FOREMAN_ACTOR;\n",
+      "src/config.ts": "process.env.PORT;\n",
+      "docs/configuration.md": "| Name | What |\n|---|---|\n| `PORT` | port |\n",
+    });
+    expect(kinds(root, { decisions: false, registries: [envRegistry({ doc: "docs/configuration.md" })] })).toEqual([]);
+  });
 });
 
 describe("helpers", () => {

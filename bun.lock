@@ -18,6 +18,7 @@
         "zod": "4.6.7",
       },
       "devDependencies": {
+        "@meta-repo/design-kit": "workspace:*",
         "@meta-repo/docs-check": "workspace:*",
         "@meta-repo/test-kit": "workspace:*",
         "@types/bun": "1.3.5",
@@ -30,6 +31,23 @@
       "version": "0.1.0",
       "bin": {
         "agent-kit": "src/cli.ts",
+      },
+    },
+    "packages/create": {
+      "name": "@meta-repo/create",
+      "version": "0.1.0",
+      "bin": {
+        "meta-repo": "src/cli.ts",
+      },
+      "dependencies": {
+        "@meta-repo/agent-kit": "workspace:*",
+      },
+    },
+    "packages/design-kit": {
+      "name": "@meta-repo/design-kit",
+      "version": "0.1.0",
+      "bin": {
+        "design-kit": "src/cli.ts",
       },
     },
     "packages/docs-check": {
@@ -126,6 +144,10 @@
     "@hono/node-server": ["@hono/node-server@2.1.5", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q=="],
 
     "@meta-repo/agent-kit": ["@meta-repo/agent-kit@workspace:packages/agent-kit"],
+
+    "@meta-repo/create": ["@meta-repo/create@workspace:packages/create"],
+
+    "@meta-repo/design-kit": ["@meta-repo/design-kit@workspace:packages/design-kit"],
 
     "@meta-repo/docs-check": ["@meta-repo/docs-check@workspace:packages/docs-check"],
 

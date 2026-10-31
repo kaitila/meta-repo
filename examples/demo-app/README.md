@@ -1,6 +1,6 @@
 # demo-app
 
-A Bun HTTP API on Postgres: zod-validated routes, Drizzle with committed migrations, one config schema, tests on a per-worktree test database, and a Docker image behind Caddy. There is no web UI. Why this stack: [D0001](docs/decisions/D0001-bun-drizzle-postgres.md).
+A Bun HTTP API on Postgres: zod-validated routes, Drizzle with committed migrations, one config schema, tests on a per-worktree test database, and a Docker image behind Caddy. One server-rendered page at `/` lists the items, styled only from a tokens file. Why this stack: [D0001](docs/decisions/D0001-bun-drizzle-postgres.md); why the page is built this way: [D0002](docs/decisions/D0002-pages-from-tokens.md).
 
 ## Setup
 1. `bun install`
@@ -16,13 +16,16 @@ Every setting is in [configuration](docs/configuration.md).
 | `bun run serve` | Server without reload |
 | `bun run db:generate` | Write a migration after changing `src/db/schema.ts` |
 | `bun run db:migrate` | Apply the migrations in `src/db/migrations` |
-| `bun run check` | Typecheck, docs check and tests: run before every commit |
+| `bun run tokens` | Regenerate `src/ui/tokens.ts` after changing `src/ui/tokens.css` |
+| `bun run design:check` | Fail on raw colours and px outside the tokens file, or a stale `src/ui/tokens.ts` |
+| `bun run check` | Typecheck, docs check, design check and tests: run before every commit |
 
 Tests need Postgres at `TEST_DATABASE_URL`. Locally the database tests skip when it isn't reachable; with `CI` set they fail instead.
 
 ## Layout
 - `src/config.ts`: every environment variable, in one zod schema.
-- `src/server/`: routing, CSRF check and health check in `index.ts`; one file per resource in `routes/`.
+- `src/server/`: routing, CSRF check and health check in `index.ts`; one file per resource in `routes/`, and the web page in `routes/page.ts`.
+- `src/ui/`: the page's files. `tokens.css` holds every colour, size, space and duration; edit it to re-skin the page. `app.css` uses only those tokens. The rules: [design](docs/design.md).
 - `src/db/`: schema, client, migrations.
 - `test/`: `setup.ts` is preloaded; `helpers.ts` gives the test database and a request helper.
 

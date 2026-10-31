@@ -28,6 +28,7 @@ test("the expected templates exist", () => {
     ".claude/agents/test-writer.md",
     ".claude/agents/docs-writer.md",
     ".claude/agents/reviewer.md",
+    ".claude/agents/design-critic.md",
   ]) {
     expect(files).toContain(f);
   }
@@ -62,9 +63,17 @@ describe("well-formed", () => {
     expect(fm.name).toBe(basename(f, ".md"));
     expect((fm.description ?? "").length).toBeGreaterThan(40);
   });
-  test("the reviewer can't edit", () => {
-    const fm = frontmatter(readFileSync(join(TEMPLATES, ".claude/agents/reviewer.md"), "utf8"));
+  test.each(["reviewer", "design-critic"])("the %s can't edit", (name) => {
+    const fm = frontmatter(readFileSync(join(TEMPLATES, `.claude/agents/${name}.md`), "utf8"));
+    expect(fm.tools).toBeDefined();
     expect(fm.tools).not.toMatch(/Edit|Write/);
+  });
+  test("the design-critic judges by the project's design rules and screenshots when it can", () => {
+    const text = readFileSync(join(TEMPLATES, ".claude/agents/design-critic.md"), "utf8");
+    expect(text).toContain("docs/design.md");
+    expect(text).toContain("playwright-core");
+    expect(text).toMatch(/390 and 1280/);
+    expect(text).toContain("no screenshots");
   });
   test("ship never has the worker verify or approve its own task", () => {
     const ship = readFileSync(join(TEMPLATES, ".claude/skills/ship/SKILL.md"), "utf8");

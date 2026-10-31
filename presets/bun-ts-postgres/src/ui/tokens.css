@@ -1,0 +1,95 @@
+/*
+ * Design tokens: the one file that holds the design's raw values. Stylesheets and
+ * components use var(--name) and nothing else; the design lint fails on a raw colour
+ * or px value anywhere but here. Edit this file to re-skin the app, then regenerate
+ * tokens.ts with `design-kit tokens tokens.css`.
+ *
+ * Palette: warm paper and ink, one green accent. Every text pair meets WCAG AA in
+ * both schemes (a test checks it), and borders that mark a control reach 3:1.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Colour, by role */
+  --color-bg: #f6f4ef;
+  --color-surface: #fdfcf9;
+  --color-ink: #1c1b18;
+  --color-ink-muted: #5c5850;
+  --color-line: #dedad0;
+  --color-line-strong: #8a8477;
+  --color-accent: #1f5c4a;
+  --color-accent-hover: #174536;
+  --color-on-accent: #fdfcf9;
+  --color-danger: #9e2f25;
+  --color-focus: var(--color-accent);
+
+  /* Type: a serif for display, the system sans for reading, mono for data */
+  --font-display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Scale: major third (1.25) from 1rem */
+  --text-sm: 0.8125rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5625rem;
+  --text-2xl: 1.953rem;
+  --text-display: clamp(2.25rem, 1.75rem + 2.5vw, 3.05rem);
+
+  --leading-tight: 1.05;
+  --leading-snug: 1.3;
+  --leading-body: 1.55;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --tracking-tight: -0.02em;
+  --tracking-caps: 0.08em;
+
+  /* Space: a 4px grid, in rem so it follows the reader's font size */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  /* Layout */
+  --measure: 38rem;
+  --control-height: 2.75rem;
+  --border-width: 1px;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* Radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #131311;
+    --color-surface: #1b1a17;
+    --color-ink: #ece8de;
+    --color-ink-muted: #a39e92;
+    --color-line: #2f2d29;
+    --color-line-strong: #77726a;
+    --color-accent: #7fc4a6;
+    --color-accent-hover: #9fd4bc;
+    --color-on-accent: #0f1f18;
+    --color-danger: #f0907f;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
