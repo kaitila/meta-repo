@@ -112,3 +112,14 @@ test("outside a git repository: a one-line error, not a stack trace", () => {
   expect(r.code).toBe(1);
   expect(r.err.trim()).toMatch(/^foreman: not inside a git repository/);
 });
+
+test("fm add without --risk takes the default from the paths (T-0031)", () => {
+  const root = repo();
+  const plain = JSON.parse(sh(["bun", CLI, "add", "docs", "--check", "cmd: true", "--path", "docs/**", "--json"], root).out);
+  expect(plain.risk).toBe("auto");
+  const guarded = JSON.parse(sh(["bun", CLI, "add", "ci", "--check", "cmd: true", "--path", ".github/**", "--json"], root).out);
+  expect(guarded.risk).toBe("review");
+  const given = JSON.parse(sh(["bun", CLI, "add", "x", "--check", "cmd: true", "--path", "docs/**", "--risk", "human", "--json"], root).out);
+  expect(given.risk).toBe("human");
+  expect(sh(["bun", CLI, "add", "y", "--risk", "maybe"], root).code).toBe(1);
+});
