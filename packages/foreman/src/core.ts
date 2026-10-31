@@ -614,7 +614,12 @@ export class Foreman {
     // What was verified must be what merges: a PR that moved after its verdict goes back.
     const before = this.get(id);
     const verifiedSha = this.verifiedHead(id) ?? undefined;
-    const target = pr ?? before.pr;
+    // The PR that was verified is the one that merges: another PR argument can't stand in
+    // for it and skip the checks below (T-0037).
+    if (pr && before.pr && pr.trim() !== before.pr) {
+      throw new ForemanError("pr_mismatch", `${id}'s PR is ${before.pr}, not ${pr}: the verified PR is the one that merges`);
+    }
+    const target = before.pr ?? pr;
     if (verifiedSha && target) {
       const now = this.policy.prInfo?.(target)?.headSha;
       if (!now) {
