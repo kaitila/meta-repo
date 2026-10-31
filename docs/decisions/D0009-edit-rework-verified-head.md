@@ -20,7 +20,9 @@ Amends [D0006](D0006-foreman-mvp-rules.md) and [D0008](D0008-risk-from-paths.md)
   - **On submit:** a GitHub PR must be on this repository (from the `origin` remote), and its head branch must be the task's recorded branch. If no branch was recorded, the PR's branch becomes the task's.
   - **At the verdict:** a passing verdict records the PR's head commit.
   - **On merge:** `merged` is refused if the PR has moved since. The fix is rework and a fresh verification.
-  - **Without GitHub:** non-GitHub PR strings and repos without a GitHub origin are allowed. The verdict-time diff falls back as in D0008.
+  - **Fail closed:** a GitHub PR is checked or refused, never waved through. If there's no GitHub origin, or `gh` can't look the PR up (missing or logged out), submit is refused, and so is merge after a verdict (verifier finding on T-0017).
+  - **The file list** comes from GitHub's API, which also lists a renamed file's old path. Moving a protected file elsewhere still needs a person.
+  - **Without GitHub:** non-GitHub PR strings (`#12`) are allowed. The verdict-time diff falls back to the recorded branch, as in D0008.
 
 **Why:**
 - Adding paths can't hide anything, because the real diff decides who signs off (D0008). Letting a worker change its checks or its spec after starting would let it grade its own work.

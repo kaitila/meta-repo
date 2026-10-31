@@ -118,8 +118,13 @@ export function gitPolicy(root: string | null, run: Run = defaultRun): Policy {
       // The PR is what gets merged: ask GitHub for its files. A worker can't steer this
       // by recording some other branch.
       if (pr && GITHUB_PR.test(pr)) {
-        const out = run(["gh", "pr", "diff", pr, "--name-only"], root);
-        return out === null ? null : out.split("\n").filter(Boolean);
+        // The API lists a renamed file's old path too, so moving a protected file away counts.
+        const m = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(pr)!;
+        const out = run(
+          ["gh", "api", "--paginate", `repos/${m[1]}/${m[2]}/pulls/${m[3]}/files`, "--jq", ".[] | .filename, (.previous_filename // empty)"],
+          root,
+        );
+        return out === null ? null : [...new Set(out.split("\n").filter(Boolean))];
       }
       // No GitHub PR (local-only workflows): fall back to the recorded branch. Weaker,
       // because the worker names the branch (D0008).

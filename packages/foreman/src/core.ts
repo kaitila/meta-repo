@@ -382,12 +382,20 @@ export class Foreman {
     let info: { head: string; headSha: string } | null = null;
     const urlRepo = prRepo(pr);
     if (urlRepo) {
+      // A GitHub PR is checked or refused, never waved through: if gh can't confirm it,
+      // a worker could submit any PR it likes (verifier-13 on T-0017).
       const origin = this.policy.originRepo?.() ?? null;
-      if (origin && origin.toLowerCase() !== urlRepo.toLowerCase()) {
+      if (!origin) {
+        throw new ForemanError("pr_unverifiable", `can't tell which GitHub repository this is (no GitHub origin remote), so ${pr} can't be checked`);
+      }
+      if (origin.toLowerCase() !== urlRepo.toLowerCase()) {
         throw new ForemanError("pr_mismatch", `${pr} is a PR on ${urlRepo}, not on this repository (${origin})`);
       }
       info = this.policy.prInfo?.(pr) ?? null;
-      if (info && before.branch && info.head !== before.branch) {
+      if (!info) {
+        throw new ForemanError("pr_unverifiable", `couldn't look up ${pr} (is gh installed and logged in?)`);
+      }
+      if (before.branch && info.head !== before.branch) {
         throw new ForemanError("pr_mismatch", `${pr} is from branch ${info.head}, but ${id}'s branch is ${before.branch}`);
       }
     }
@@ -573,7 +581,10 @@ export class Foreman {
     const target = pr ?? before.pr;
     if (verifiedSha && target) {
       const now = this.policy.prInfo?.(target)?.headSha;
-      if (now && now !== verifiedSha) {
+      if (!now) {
+        throw new ForemanError("pr_unverifiable", `couldn't look up ${target} to confirm it is still at ${verifiedSha.slice(0, 8)} (is gh installed and logged in?)`);
+      }
+      if (now !== verifiedSha) {
         throw new ForemanError(
           "changed_after_verify",
           `${target} is at ${now.slice(0, 8)}, but ${id} was verified at ${verifiedSha.slice(0, 8)}: send it back with rework and verify again`,

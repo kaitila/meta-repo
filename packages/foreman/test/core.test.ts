@@ -240,14 +240,29 @@ describe("the PR decides, not the reported branch (T-0016)", () => {
   const { gitPolicy, GITHUB_PR } = require("../src/policy") as typeof import("../src/policy");
   const PR = "https://github.com/acme/app/pull/7";
 
-  test("a GitHub PR's own files are used; the recorded branch is ignored", () => {
+  // A fake gh and git: the PR's files (one renamed), its head, and this repo's origin.
+  const fakeRun = (files: string) => (cmd: string[]) => {
+    if (cmd[0] === "gh" && cmd[1] === "api") return files;
+    if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "view") return JSON.stringify({ headRefName: "clean", headRefOid: "abc123" });
+    if (cmd[0] === "git" && cmd[1] === "remote") return "git@github.com:acme/app.git";
+    return "";
+  };
+
+  test("a GitHub PR's own files are used, from the API; the recorded branch is ignored", () => {
     const calls: string[][] = [];
     const policy = gitPolicy("/repo", (cmd) => {
       calls.push(cmd);
-      return cmd[0] === "gh" ? "src/a.ts\n.github/workflows/ci.yml" : "";
+      return fakeRun("src/a.ts\n.github/workflows/ci.yml")(cmd);
     });
     expect(policy.changedFiles({ branch: "an-empty-branch", pr: PR })).toEqual(["src/a.ts", ".github/workflows/ci.yml"]);
-    expect(calls).toEqual([["gh", "pr", "diff", PR, "--name-only"]]);
+    expect(calls[0]!.slice(0, 4)).toEqual(["gh", "api", "--paginate", "repos/acme/app/pulls/7/files"]);
+  });
+
+  test("a protected file renamed away still counts: its old path is listed too", () => {
+    // The API's jq prints filename, then previous_filename for renames.
+    const policy = gitPolicy("/repo", fakeRun("docs/moved-settings.json\n.claude/settings.json"));
+    const files = policy.changedFiles({ branch: "b", pr: PR })!;
+    expect(files).toContain(".claude/settings.json");
   });
 
   test("gh failing means unknown, not clean", () => {
@@ -256,7 +271,7 @@ describe("the PR decides, not the reported branch (T-0016)", () => {
 
   test("an auto task with a clean branch but a protected change in its PR is escalated", () => {
     let clock = 1;
-    const policy = gitPolicy("/repo", (cmd) => (cmd[0] === "gh" ? "AGENTS.md" : ""));
+    const policy = gitPolicy("/repo", fakeRun("AGENTS.md"));
     const f = new Foreman(openDb(":memory:"), null, () => ++clock, policy);
     const t = f.create({ title: "x", acceptance: ["cmd: true"], paths: ["src/**"], ready: true }, human);
     f.claim(t.id, worker);

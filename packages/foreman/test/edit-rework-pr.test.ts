@@ -156,11 +156,33 @@ describe("the PR (T-0017)", () => {
     expect(f.merged(t.id, worker).status).toBe("done");
   });
 
-  test("non-GitHub PR strings and unknown origins still work (local workflows)", () => {
+  test("non-GitHub PR strings still work (local workflows)", () => {
     const { f } = setup({ origin: null });
     const t = ready(f);
     f.claim(t.id, worker);
     expect(f.submit(t.id, worker, { pr: "#12" }).status).toBe("in_review");
+  });
+
+  test("a GitHub PR that can't be checked is refused, not waved through", () => {
+    const noOrigin = setup({ origin: null });
+    const t1 = ready(noOrigin.f);
+    noOrigin.f.claim(t1.id, worker);
+    expect(code(() => noOrigin.f.submit(t1.id, worker, { pr: PR }))).toBe("pr_unverifiable");
+
+    // gh missing or logged out: prInfo can't answer
+    const { f } = setup();
+    (f.policy as { prInfo?: unknown }).prInfo = () => null;
+    const t2 = ready(f);
+    f.claim(t2.id, worker);
+    expect(code(() => f.submit(t2.id, worker, { pr: PR }))).toBe("pr_unverifiable");
+  });
+
+  test("merging is refused when the PR can't be looked up after it was verified", () => {
+    const { f } = setup();
+    const t = ready(f);
+    expect(toApproved(f, t.id).status).toBe("approved");
+    (f.policy as { prInfo?: unknown }).prInfo = () => null;
+    expect(code(() => f.merged(t.id, worker))).toBe("pr_unverifiable");
   });
 
   test("repo names from PR URLs and remotes", () => {
