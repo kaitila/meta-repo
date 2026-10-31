@@ -4,7 +4,7 @@
 import type { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { gitPolicy, isProtected, mayTouchProtected, type Policy } from "./policy";
+import { gitPolicy, isProtected, mayTouchProtected, type Policy, prRepo } from "./policy";
 import { dbPath, openDb, repoRoot } from "./store";
 
 export type Risk = "auto" | "review" | "human";
@@ -126,6 +126,20 @@ function toEvent(r: Row): Event {
     type: r.type as string,
     data: JSON.parse(r.data as string),
   };
+}
+
+export interface EditInput {
+  title?: string;
+  spec?: string;
+  /** New checks, same forms as at create ("cmd: ...", "statement: ..."). */
+  addChecks?: string[];
+  /** Check ids to drop (c2, ...). */
+  removeChecks?: string[];
+  /** Replace the paths. */
+  paths?: string[];
+  /** Add paths (the one change a holder may make while working). */
+  addPaths?: string[];
+  risk?: Risk;
 }
 
 export interface CreateInput {
@@ -359,13 +373,116 @@ export class Foreman {
 
   /** The worker hands in its PR. It lets go of the task: verification is someone else's job. */
   submit(id: string, actor: Actor, s: { pr: string; summary?: string }): Task {
+    const pr = s.pr.trim();
+    if (!pr) throw new ForemanError("invalid", "submit needs the PR (url or number)");
+    // A GitHub PR must be this repository's, and its branch the task's (T-0017): otherwise
+    // a worker could point foreman at some other, harmless PR. Looked up outside the
+    // transaction because it calls GitHub.
+    const before = this.get(id);
+    let info: { head: string; headSha: string } | null = null;
+    const urlRepo = prRepo(pr);
+    if (urlRepo) {
+      // A GitHub PR is checked or refused, never waved through: if gh can't confirm it,
+      // a worker could submit any PR it likes (verifier-13 on T-0017).
+      const origin = this.policy.originRepo?.() ?? null;
+      if (!origin) {
+        throw new ForemanError("pr_unverifiable", `can't tell which GitHub repository this is (no GitHub origin remote), so ${pr} can't be checked`);
+      }
+      if (origin.toLowerCase() !== urlRepo.toLowerCase()) {
+        throw new ForemanError("pr_mismatch", `${pr} is a PR on ${urlRepo}, not on this repository (${origin})`);
+      }
+      info = this.policy.prInfo?.(pr) ?? null;
+      if (!info) {
+        throw new ForemanError("pr_unverifiable", `couldn't look up ${pr} (is gh installed and logged in?)`);
+      }
+      if (before.branch && info.head !== before.branch) {
+        throw new ForemanError("pr_mismatch", `${pr} is from branch ${info.head}, but ${id}'s branch is ${before.branch}`);
+      }
+    }
     return this.tx(() => {
       const t = this.get(id);
       this.expect(t, ["claimed", "in_progress"], "submit");
       this.holder(t, actor, "submit");
-      if (!s.pr.trim()) throw new ForemanError("invalid", "submit needs the PR (url or number)");
-      this.set(id, { status: "in_review", pr: s.pr.trim(), assignee: null, lease_until: null });
-      this.event(id, actor, "submitted", s);
+      const fields: Record<string, string | number | null> = { status: "in_review", pr, assignee: null, lease_until: null };
+      if (info && !t.branch) fields.branch = info.head;
+      this.set(id, fields);
+      this.event(id, actor, "submitted", { ...s, pr, ...(info ? { head: info.head, headSha: info.headSha } : {}) });
+      return this.get(id);
+    });
+  }
+
+  /**
+   * Send a submitted, verified or approved task back to work (T-0025): the PR is changing
+   * again, or a gap was found after the verdict. It must be claimed and verified anew.
+   * Its workers or a person may do this.
+   */
+  rework(id: string, actor: Actor, reason: string): Task {
+    return this.tx(() => {
+      const t = this.get(id);
+      this.expect(t, ["in_review", "needs_approval", "approved"], "send back for rework");
+      if (actor.kind !== "human" && !this.workers(id).has(actor.name)) {
+        throw new ForemanError("not_worker", `only someone who worked on ${id}, or a person, can send it back`);
+      }
+      if (!reason.trim()) throw new ForemanError("invalid", "rework needs a reason");
+      this.set(id, { status: "ready", assignee: null, lease_until: null });
+      this.event(id, actor, "rework", { reason, was: t.status });
+      return this.get(id);
+    });
+  }
+
+  /**
+   * Change a task (T-0009). Before work starts anything can change; a person may also
+   * edit a claimed task. Once claimed, the holder may only add paths (work turned out to
+   * touch more files: the diff still decides who signs off). Nobody edits a task under
+   * review: send it back with rework first. Only a person lowers risk, and a ready task
+   * keeps at least one check.
+   */
+  edit(id: string, actor: Actor, c: EditInput): Task {
+    return this.tx(() => {
+      const t = this.get(id);
+      const human = actor.kind === "human";
+      const open = t.status === "draft" || t.status === "ready";
+      const working = t.status === "claimed" || t.status === "in_progress";
+      if (!open && !working) {
+        throw new ForemanError("bad_status", `can't edit ${id}: it is ${t.status}${["in_review", "verifying", "needs_approval", "approved"].includes(t.status) ? " (send it back with rework first)" : ""}`);
+      }
+      const onlyAddsPaths = Object.entries(c).every(([k, v]) => v === undefined || k === "addPaths");
+      if (working && !human) {
+        this.holder(t, actor, "edit");
+        if (!onlyAddsPaths) throw new ForemanError("in_progress", `${id} is being worked on: its holder may only add paths`);
+      }
+      const order: Risk[] = ["auto", "review", "human"];
+      if (c.risk && order.indexOf(c.risk) < order.indexOf(t.risk) && !human) {
+        throw new ForemanError("human_only", `only a person can lower ${id}'s risk (${t.risk} → ${c.risk})`);
+      }
+      let acceptance = t.acceptance;
+      if (c.removeChecks?.length) {
+        const unknown = c.removeChecks.filter((r) => !acceptance.some((x) => x.id === r));
+        if (unknown.length) throw new ForemanError("invalid", `${id} has no check ${unknown.join(", ")}`);
+        acceptance = acceptance.filter((x) => !c.removeChecks!.includes(x.id));
+      }
+      if (c.addChecks?.length) {
+        // New checks get new ids; ids are never reused, so old verdicts stay readable.
+        let next = Math.max(0, ...t.acceptance.map((x) => Number(x.id.slice(1)) || 0));
+        acceptance = [...acceptance, ...c.addChecks.map((x) => ({ ...parseCheck(x, 0), id: `c${++next}` }))];
+      }
+      if (t.status !== "draft" && t.risk !== "human" && (c.risk ?? t.risk) !== "human" && acceptance.length === 0) {
+        throw new ForemanError("invalid", `${id} would have no acceptance checks; a ready task needs one`);
+      }
+      let paths = c.paths ?? t.paths;
+      if (c.addPaths?.length) paths = [...new Set([...paths, ...c.addPaths])];
+      const fields: Record<string, string | number | null> = {};
+      if (c.title !== undefined) {
+        if (!c.title.trim()) throw new ForemanError("invalid", "a task needs a title");
+        fields.title = c.title.trim();
+      }
+      if (c.spec !== undefined) fields.spec = c.spec;
+      if (c.risk) fields.risk = c.risk;
+      if (JSON.stringify(acceptance) !== JSON.stringify(t.acceptance)) fields.acceptance = JSON.stringify(acceptance);
+      if (JSON.stringify(paths) !== JSON.stringify(t.paths)) fields.paths = JSON.stringify(paths);
+      if (!Object.keys(fields).length) return t;
+      this.set(id, fields);
+      this.event(id, actor, "edited", c);
       return this.get(id);
     });
   }
@@ -407,6 +524,8 @@ export class Foreman {
     const before = this.get(id);
     const branch = before.branch;
     const changed = before.risk === "auto" ? this.policy.changedFiles({ branch, pr: before.pr }) : [];
+    // The commit the verdict is about: merging is refused if the PR moves past it (T-0017).
+    const headSha = before.pr && results.every((r) => r.pass) ? (this.policy.prInfo?.(before.pr)?.headSha ?? null) : null;
     return this.tx(() => {
       const t = this.get(id);
       this.expect(t, ["verifying"], "record a verdict on");
@@ -423,7 +542,7 @@ export class Foreman {
       const pass = results.every((r) => r.pass);
       let next: Status = !pass ? "ready" : t.risk === "auto" ? "approved" : "needs_approval";
       this.set(id, { status: next, assignee: null, lease_until: null });
-      this.event(id, actor, pass ? "verified" : "verify_failed", { results });
+      this.event(id, actor, pass ? "verified" : "verify_failed", { results, ...(headSha ? { headSha } : {}) });
       if (next === "approved") {
         // The real diff decides (D0008): a protected file, or a diff we can't see, needs a person.
         // An empty diff is as good as none: nothing to approve automatically.
@@ -455,6 +574,23 @@ export class Foreman {
 
   /** The approved PR was merged. */
   merged(id: string, actor: Actor, pr?: string): Task {
+    // What was verified must be what merges: a PR that moved after its verdict goes back.
+    const before = this.get(id);
+    const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
+    const verifiedSha = verified?.data.headSha as string | undefined;
+    const target = pr ?? before.pr;
+    if (verifiedSha && target) {
+      const now = this.policy.prInfo?.(target)?.headSha;
+      if (!now) {
+        throw new ForemanError("pr_unverifiable", `couldn't look up ${target} to confirm it is still at ${verifiedSha.slice(0, 8)} (is gh installed and logged in?)`);
+      }
+      if (now !== verifiedSha) {
+        throw new ForemanError(
+          "changed_after_verify",
+          `${target} is at ${now.slice(0, 8)}, but ${id} was verified at ${verifiedSha.slice(0, 8)}: send it back with rework and verify again`,
+        );
+      }
+    }
     return this.tx(() => {
       const t = this.get(id);
       this.expect(t, ["approved"], "mark merged");

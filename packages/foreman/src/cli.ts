@@ -24,6 +24,9 @@ Tasks
   list [--status s]... [--mine]
   next                          ready tasks whose blockers are done
   show <id>                     task, checks and history
+  edit <id> [--title t] [--spec md] [--check "cmd: ..."]... [--remove-check c2]... [--path g]... [--add-path g]... [--risk r]
+                                before work: anything; while claimed: the holder may only --add-path
+  rework <id> --reason text     send a submitted, verified or approved task back to work (verify again after)
   cancel <id> --reason text
 
 Working (worker)
@@ -96,6 +99,9 @@ export async function main(argv: string[]): Promise<number | null> {
       reason: { type: "string" },
       task: { type: "string" },
       out: { type: "string" },
+      title: { type: "string" },
+      "remove-check": { type: "string", multiple: true },
+      "add-path": { type: "string", multiple: true },
     },
   });
   const [cmd, ...args] = positionals;
@@ -155,6 +161,26 @@ export async function main(argv: string[]): Promise<number | null> {
       const ev = f.events(t.id);
       return out({ ...t, events: ev }, toMarkdown(t, ev)), 0;
     }
+    case "edit": {
+      const risk = o.risk as Task["risk"] | undefined;
+      if (risk && !["auto", "review", "human"].includes(risk)) throw new ForemanError("invalid", `bad risk ${risk}`);
+      return (
+        one(
+          f.edit(need(0, "task id"), me, {
+            title: o.title,
+            spec: o.spec,
+            addChecks: o.check,
+            removeChecks: o["remove-check"],
+            paths: o.path,
+            addPaths: o["add-path"],
+            risk,
+          }),
+        ),
+        0
+      );
+    }
+    case "rework":
+      return one(f.rework(need(0, "task id"), me, o.reason ?? "")), 0;
     case "cancel":
       return one(f.cancel(need(0, "task id"), me, o.reason ?? "")), 0;
     case "claim":
