@@ -16,6 +16,13 @@ Status: MVP (step M3). The dispatcher, the verifier launcher, the janitor and th
   - `human` tasks are claimed and finished only by people.
   - **Default risk:** a task is `auto` unless its declared paths touch the `protectedPaths` in `foreman.json` (guardrails, CI, foreman itself).
   - **The diff decides:** when an `auto` task passes, foreman diffs its branch against main. If any protected file changed, or the diff can't be seen, the task goes to a person instead.
+- **Reserving numbers:** `reserve <kind>` hands out the highest number on disk or reserved before, plus one. On disk means `docs/decisions/D*` file names for `decision`, and nothing for other kinds, unless `foreman.json` names a source for the kind. The pattern's first capture group is the number, and paths are relative to the repo root:
+  ```json
+  { "numbers": {
+      "decision": { "file": "docs/decisions.md", "pattern": "^## D(\\d+)\\." },
+      "migration": { "glob": "db/*.sql", "pattern": "^(\\d+)_" } } }
+  ```
+  With `file`, the pattern runs over the file's text (multiline). With `glob`, it runs over each matched file's name. An entry replaces the default for its kind, a missing file counts as empty, and a malformed entry (neither or both of `file` and `glob`, or a pattern without a capture group) is refused.
 - **Exporting:** `export` writes a task as markdown (spec, checks, verdict, history) for the PR that delivers it.
 
 ```

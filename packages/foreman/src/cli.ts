@@ -45,7 +45,7 @@ Signing off
 
 Housekeeping
   reclaim                       release claims whose lease ran out
-  reserve <kind> [--task id]    next free number (kind "decision" also reads docs/decisions)
+  reserve <kind> [--task id]    next free number (also reads what is on disk: foreman.json "numbers")
   export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
   mcp                           run the MCP server on stdio
 
