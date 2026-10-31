@@ -1,0 +1,4 @@
+{
+  "extends": "../packages/foreman/tsconfig.json",
+  "include": ["generate.ts", "test"]
+}
