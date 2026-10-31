@@ -611,7 +611,8 @@ export class Foreman {
   merged(id: string, actor: Actor, pr?: string): Task {
     // What was verified must be what merges: a PR that moved after its verdict goes back.
     const before = this.get(id);
-    const verifiedSha = this.verifiedHead(id) ?? undefined;
+    const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
+    const verifiedSha = (verified?.data.headSha as string | undefined) ?? undefined;
     const target = pr ?? before.pr;
     // A GitHub PR's verdict always records its commit; none means gh couldn't say then, so we can't tell now.
     if (verified && !verifiedSha && target && prRepo(target)) {
