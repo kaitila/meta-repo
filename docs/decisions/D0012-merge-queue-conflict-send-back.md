@@ -2,7 +2,7 @@
 
 **Status:** Active
 
-**Context:** D0011's merge queue sends an approved PR that conflicts with main back to work. `rework` lets only the task's workers or a person do that ([D0009](D0009-edit-rework-verified-head.md)), and the queue is neither: it runs as an agent.
+**Context:** The merge queue of [D0011](D0011-foreman-dispatch.md) sends an approved PR that conflicts with main back to work. `rework` lets only the task's workers or a person do that ([D0009](D0009-edit-rework-verified-head.md)), and the queue is neither: it runs as an agent.
 
 **Chosen:**
 - **A separate verb, `sendBackConflict`,** instead of loosening `rework`. Anyone may call it, the queue included, but it acts only on an `approved` task, and only when foreman itself reads the PR from GitHub and GitHub says `CONFLICTING`. Otherwise it is refused.
