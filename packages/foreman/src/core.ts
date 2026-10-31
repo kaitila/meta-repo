@@ -579,6 +579,10 @@ export class Foreman {
     const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
     const verifiedSha = verified?.data.headSha as string | undefined;
     const target = pr ?? before.pr;
+    // A GitHub PR's verdict always records its commit; none means gh couldn't say then, so we can't tell now.
+    if (verified && !verifiedSha && target && prRepo(target)) {
+      throw new ForemanError("pr_unverifiable", `${id} was verified without a recorded commit for ${target}: rework and verify again`);
+    }
     if (verifiedSha && target) {
       const now = this.policy.prInfo?.(target)?.headSha;
       if (!now) {
