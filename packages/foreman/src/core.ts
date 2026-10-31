@@ -611,7 +611,8 @@ export class Foreman {
   merged(id: string, actor: Actor, pr?: string): Task {
     // What was verified must be what merges: a PR that moved after its verdict goes back.
     const before = this.get(id);
-    const verifiedSha = this.verifiedHead(id) ?? undefined;
+    const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
+    const verifiedSha = (verified?.data.headSha as string | undefined) ?? undefined;
     // The PR that was verified is the one that merges: another PR argument can't stand in
     // for it and skip the checks below (T-0037).
     if (pr && before.pr && pr.trim() !== before.pr) {
