@@ -18,6 +18,19 @@ export interface InstallResult {
   merged: string[]; // settings files whose permission lists gained rules
   kept: string[]; // files left alone because the project already has them
   omitted: string[]; // baseline rules not added because the project lists them in OMIT_FILE
+  unmatchedOmit: string[]; // OMIT_FILE entries that match no baseline rule or hook command (usually typos)
+}
+
+/** The omit entries that name nothing in the baseline: not any permission rule (deny/ask/allow) nor any hook command. */
+export function unmatchedOmit(baseline: Settings, omit: string[]): string[] {
+  const known = new Set<string>();
+  for (const key of ["deny", "ask", "allow"]) {
+    for (const r of (baseline.permissions?.[key] as string[] | undefined) ?? []) known.add(r);
+  }
+  for (const groups of Object.values((baseline.hooks as Record<string, HookGroup[]>) ?? {})) {
+    for (const g of groups) for (const h of g.hooks) known.add(h.command);
+  }
+  return [...new Set(omit)].filter((e) => !known.has(e));
 }
 
 /** Read OMIT_FILE's "omit" list: permission rules and hook commands. A file that's there but malformed throws. */
@@ -88,7 +101,7 @@ export function mergeSettings(
 }
 
 export function install(target: string, templates = TEMPLATES): InstallResult {
-  const result: InstallResult = { created: [], merged: [], kept: [], omitted: [] };
+  const result: InstallResult = { created: [], merged: [], kept: [], omitted: [], unmatchedOmit: [] };
   const omit = readOmit(target);
   for (const rel of walk(templates)) {
     const src = join(templates, rel);
@@ -96,11 +109,9 @@ export function install(target: string, templates = TEMPLATES): InstallResult {
     const shown = relative(target, dst);
     if (rel === join(".claude", "settings.json") && (existsSync(dst) || omit.length)) {
       const fresh = !existsSync(dst);
-      const { settings, added, omitted } = mergeSettings(
-        fresh ? {} : JSON.parse(readFileSync(dst, "utf8")),
-        JSON.parse(readFileSync(src, "utf8")),
-        omit,
-      );
+      const base = JSON.parse(readFileSync(src, "utf8"));
+      const { settings, added, omitted } = mergeSettings(fresh ? {} : JSON.parse(readFileSync(dst, "utf8")), base, omit);
+      result.unmatchedOmit.push(...unmatchedOmit(base, omit));
       result.omitted.push(...omitted);
       if (fresh) {
         mkdirSync(dirname(dst), { recursive: true });

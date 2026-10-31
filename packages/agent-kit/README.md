@@ -16,7 +16,7 @@ bun packages/agent-kit/src/cli.ts init [dir]
 
 - Each entry is a permission rule, written exactly as in the baseline, or a hook's `command` (that skips the hook group running it).
 - `init` prints each baseline rule it skipped: `omitted  Bash(ssh *) (listed in .claude/agent-kit.json)`.
-- The omit list only stops rules being added. A rule the project still has stays, and entries that match no baseline rule are ignored.
+- The omit list only stops rules being added. A rule the project still has stays, and an entry that matches no baseline rule or hook command (usually a typo) is reported as `warning  omit entry "Bash(sshh *)" matches no baseline rule or hook command (.claude/agent-kit.json)`. It only warns; `init` still succeeds.
 - It applies to a first install too. A malformed file stops `init` with an error, before anything is written.
 - `init` never creates or changes this file.
 
