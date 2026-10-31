@@ -613,7 +613,12 @@ export class Foreman {
     const before = this.get(id);
     const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
     const verifiedSha = (verified?.data.headSha as string | undefined) ?? undefined;
-    const target = pr ?? before.pr;
+    // The PR that was verified is the one that merges: another PR argument can't stand in
+    // for it and skip the checks below (T-0037).
+    if (pr && before.pr && pr.trim() !== before.pr) {
+      throw new ForemanError("pr_mismatch", `${id}'s PR is ${before.pr}, not ${pr}: the verified PR is the one that merges`);
+    }
+    const target = before.pr ?? pr;
     // A GitHub PR's verdict always records its commit; none means gh couldn't say then, so we can't tell now.
     if (verified && !verifiedSha && target && prRepo(target)) {
       throw new ForemanError("pr_unverifiable", `${id} was verified without a recorded commit for ${target}: rework and verify again`);
