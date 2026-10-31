@@ -9,6 +9,7 @@ A starter for projects where AI coding agents (Claude Code; other tools later, s
 - `packages/foreman/`: the task layer ([README](packages/foreman/README.md)).
 - `packages/agent-kit/`: guardrail baseline and templates ([README](packages/agent-kit/README.md)). This repo runs its own baseline (`.claude/settings.json`).
 - `packages/docs-check/`: keeps the docs true to the code ([README](packages/docs-check/README.md)).
+- `packages/create/`: `create`, `init` and `sync`: start a project from a preset, add the kit to a repo, take the kit's updates ([README](packages/create/README.md)).
 
 ## Commands
 - Test Postgres (once): `docker run -d --name metarepo-pg -e POSTGRES_USER=metarepo -e POSTGRES_PASSWORD=metarepo -p 127.0.0.1:5544:5432 postgres:16 -c fsync=off`. Database tests skip without it locally and fail without it on CI.
