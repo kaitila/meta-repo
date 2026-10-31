@@ -28,13 +28,15 @@ An app made from the preset owns a copy of the tokens file. To re-skin it, edit 
 
 | Rule | Fails on |
 |---|---|
-| raw-color | a hex colour (`#e11d48`), or `rgb()`, `rgba()`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()` |
+| raw-color | a hex colour (`#e11d48`), or `rgb()`, `rgba()`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, or a CSS named colour (`red`, `rebeccapurple`, `White`: the full CSS Color 4 list, any case, whole words only) |
 | raw-px | any non-zero `px` length, including in `@media` (use `em` there) |
 | unknown-token | `var(--x)` where `--x` is neither a token nor a custom property the same file defines |
 
 In CSS only declaration values and at-rule conditions are read, so an id selector like `#add` isn't taken for a colour. In JS and TS, comments are skipped and strings are read. A line containing `design-lint-allow` is skipped: say why on the same line.
 
-Not caught: named colours (`red`) and bare numbers in JS style objects.
+Named colours: `transparent`, `currentColor`, `inherit` and the other CSS-wide keywords are allowed. In CSS the value is read without its quoted strings, `url()`, `attr()`, `local()`, `counter()` and the name inside `var()` (a fallback, `var(--x, red)`, is read), and `font`, `font-family`, `animation(-name)`, `grid-area` and the other properties that hold names are skipped. In JS, TS and HTML a colour word counts only inside a string that is a style value: `"color: red"`, `style="background: tomato"`, or the value after a colour key (`fill="navy"`, `{ color: "red" }`). Words in code (`red`, `white`) and other strings never do.
+
+Not caught: bare numbers in JS style objects; named colours in unquoted or computed JS values; a colour word used as a name inside a property not on the skip list (e.g. a custom property holding a custom ident).
 
 ## Screenshots
 `design-kit screenshot` writes `page-<width>-<scheme>.png` at each width, light and dark, and says when a page scrolls sideways. It needs playwright-core and a browser, which this package doesn't install. Without them it exits 3 and says how to add them. The design-critic agent (agent-kit's `templates/.claude/agents/design-critic.md`) uses it when it's there, and reviews the served markup and styles when it isn't.
