@@ -46,7 +46,8 @@ function fromInstall(r: InstallResult): Change[] {
 }
 
 function run(cmd: string[], cwd: string) {
-  const p = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+  // The env is passed explicitly: Bun's default is the env at startup, not process.env now.
+  const p = Bun.spawnSync(cmd, { cwd, env: { ...process.env }, stdout: "pipe", stderr: "pipe" });
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")} failed: ${(p.stderr.toString() || p.stdout.toString()).trim()}`);
   return p.stdout.toString();
 }
@@ -66,7 +67,7 @@ export function create(dir: string, opts: CreateOptions = {}): Change[] {
   if (!NAME.test(name)) throw new Error(`name must be lower-case letters, digits and dashes, starting with a letter: "${name}" (pass --name)`);
   if (existsSync(target) && readdirSync(target).length) throw new Error(`${dir} is not empty (use init to add the kit to a repository)`);
   // Checked before anything is written, so a missing identity doesn't leave a half-made project.
-  if (opts.git !== false && Bun.spawnSync(["git", "var", "GIT_AUTHOR_IDENT"], { cwd: PRESETS, stdout: "ignore", stderr: "ignore" }).exitCode !== 0) {
+  if (opts.git !== false && Bun.spawnSync(["git", "var", "GIT_AUTHOR_IDENT"], { cwd: PRESETS, env: { ...process.env }, stdout: "ignore", stderr: "ignore" }).exitCode !== 0) {
     throw new Error("git has no user.name/user.email for the first commit (set them, or pass --no-git)");
   }
 
