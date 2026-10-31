@@ -22,7 +22,7 @@ Status: MVP (step M3), plus the launch adapter, the first piece of M6. The dispa
       "decision": { "file": "docs/decisions.md", "pattern": "^## D(\\d+)\\." },
       "migration": { "glob": "db/*.sql", "pattern": "^(\\d+)_" } } }
   ```
-  With `file`, the pattern runs over the file's text (multiline). With `glob`, it runs over each matched file's name. An entry replaces the default for its kind, a missing file counts as empty, and a malformed entry (neither or both of `file` and `glob`, or a pattern without a capture group) is refused.
+  With `file`, the pattern runs over the file's text (multiline). With `glob`, it runs over each matched file's name. An entry replaces the default for its kind. A glob that matches nothing counts as empty (an empty folder is real), but a `file` that doesn't exist or can't be read is refused with its path, so `reserve` never hands out a number that file may already use. A malformed entry (neither or both of `file` and `glob`, or a pattern without a capture group) is refused.
 - **Exporting:** `export` writes a task as markdown (spec, checks, verdict, history) for the PR that delivers it.
 
 ```
