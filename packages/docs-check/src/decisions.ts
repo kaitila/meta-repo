@@ -102,12 +102,13 @@ export function parseDecisions(
     decisions.push({ n, file, title: hm[2]!, date, status: value, targets });
   }
 
-  // Numbering: unique and contiguous from 1. Duplicates are what parallel branches produce.
+  // Numbering: unique, from 1. Gaps are allowed: numbers are reserved for parallel branches, so a
+  // lower one may still be on an open PR, or reserved and never used. Duplicates are what branches
+  // that counted files themselves produce.
   const byN = new Map<number, Decision[]>();
   for (const d of decisions) byN.set(d.n, [...(byN.get(d.n) ?? []), d]);
   for (const [n, ds] of byN) if (ds.length > 1) for (const d of ds) fail(d.file, 1, "decision-number", `D${pad(n, opts.pad)} is used by ${ds.length} files`);
-  const max = Math.max(0, ...byN.keys());
-  for (let n = 1; n <= max; n++) if (!byN.has(n)) fail(opts.dir, 0, "decision-number", `missing D${pad(n, opts.pad)}`);
+  for (const d of byN.get(0) ?? []) fail(d.file, 1, "decision-number", "numbers start at 1");
   // Status targets exist and are later decisions.
   for (const d of decisions) {
     for (const t of d.targets) {
