@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-10-31 (through D0018)
 
-**Result: pass.** Five real tasks went from a one-line request to a merged PR through foreman alone: `fm intake`, then `fm dispatch --max 3`, then a fresh verifier per task, then the merge queue and the janitor. Three ran at once at the peak. There were no path clashes, no port clashes, no merge conflicts, and no decision or migration numbers to renumber. A person wrote the five requests and started the commands; nothing else was done by hand except one workaround for a merge-queue bug (below).
+**Result: pass.** Five real tasks went from a one-line request to a merged PR through foreman alone: `fm intake`, then `fm dispatch --max 3`, then a fresh verifier per task, then the merge queue and the janitor. Three ran at once at the peak. No two running tasks had overlapping declared paths, and there were no port clashes, no merge conflicts, and no decision or migration numbers to renumber. One PR did carry a change outside its task's paths (below). A person wrote the five requests and started the commands; nothing else was done by hand except one workaround for a merge-queue bug (below).
 
 ## How it was run
 
@@ -31,7 +31,7 @@ Times are minutes after intake filed the task. Every PR's checks (check, demo, c
 
 - **Intake:** five sessions, 10 to 12 turns each, $0.62 in all. Each filed one task with a spec, 2 to 4 acceptance checks and paths, as `intake-<run>`. None found a duplicate, which was right. All five came out `auto`: none touches a protected path, so they merged without a person's sign-off (D0008).
 - **Dispatch:** 10 sessions (5 workers, 5 verifiers) in about 6 minutes of wall time, $2.08. T-0045, T-0046 and T-0047 ran at once; T-0048 and T-0049 started as slots freed. Each verifier ran as `verifier-<task>`, never the worker. Leases were pinned to each session's PID.
-- **Total:** $2.70 and about 30 minutes from the first request to the last merge, most of it waiting for CI and for GitHub to compute mergeability.
+- **Total:** $2.70 (intake's and dispatch's own cost reports, not foreman events) and about 30 minutes from the first request to the last merge, most of it waiting for CI and for GitHub to compute mergeability.
 - **Janitor:** removed the five worktrees and their merged branches.
 
 ## What went wrong, and what was filed
@@ -40,9 +40,9 @@ Times are minutes after intake filed the task. Every PR's checks (check, demo, c
 - **GitHub's `UNKNOWN` mergeability costs a pass.** After each merge, the other PRs read `UNKNOWN` for about a minute, so with one merge per pass the five merged over 8 minutes. Working as designed; a shorter interval after a merge would help.
 - **The launch adapter's sessions ignore the repo's committed `permissions.allow`,** because their config directory has never been trusted. Expected: the adapter passes `--allowedTools` itself, and deny rules and hooks still apply. Each session printed a warning about it.
 - **The janitor kept two old worktrees** (T-0033, T-0037) with uncommitted changes from before this run, as it should.
-- **Something sets the executable bit on `packages/agent-kit/src/cli.ts`** in the main checkout, which then blocks `git pull`. Not from this run's tasks; not yet traced.
+- **A change outside a task's paths reached main.** T-0045's PR (#37, paths limited to the design kit) also carried a mode change, 100644 to 100755, on `packages/agent-kit/src/cli.ts`, inside T-0046's paths. The cause: `bun install` marks every package `bin` target executable, the file was stored as 100644, and the worker's commit picked the mode change up. The guard only scopes edits and shell writes, not what `git add` stages, so it didn't stop it. The same mode change kept appearing in the main checkout and blocked `git pull`. Filed as T-0052 (store bin targets as 100755, with a test). It merged without a conflict because both sides agreed on the mode.
 
 ## Against the checks
 
 - **R5:** five tasks intake → merged, three in parallel, the full history in foreman's events: **pass.**
-- **R6:** parallel workers with zero manual renumbering and no port clashes: **pass** for three at once. The plan asked for four; the run used three, per T-0036.
+- **R6:** parallel workers with zero manual renumbering and no port clashes: **partial pass.** It held for three at once, the number T-0036 asked for; the plan's R6 check asks for four, which this run didn't exercise.
