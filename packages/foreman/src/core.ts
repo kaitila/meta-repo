@@ -79,6 +79,9 @@ export class ForemanError extends Error {
 
 export const DEFAULT_LEASE_MINUTES = 30;
 
+/** The rework reason given to an approved PR that conflicts with main. */
+export const CONFLICT_REASON = "conflicts with main: merge main and verify again";
+
 /**
  * Who is calling. FOREMAN_ACTOR names them. A command Claude Code runs for the model
  * (CLAUDE_CODE_CHILD_SESSION=1), or anything with FOREMAN_AGENT=1, is an agent.
@@ -572,12 +575,45 @@ export class Foreman {
     });
   }
 
+  /** The PR commit the latest passing verdict was about, or null if it recorded none (D0009). */
+  verifiedHead(id: string): string | null {
+    const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
+    return (verified?.data.headSha as string | undefined) ?? null;
+  }
+
+  /**
+   * Send an approved task back because its PR conflicts with main (D0012). Any caller
+   * may do it, the merge queue included, because foreman checks the fact itself: GitHub
+   * must say the PR is CONFLICTING right now. The branch must merge main and be
+   * verified again, which is what rework means.
+   */
+  sendBackConflict(id: string, actor: Actor): Task {
+    const before = this.get(id);
+    this.expect(before, ["approved"], "send back for a conflict");
+    const info = before.pr ? (this.policy.prInfo?.(before.pr) ?? null) : null;
+    if (!info) {
+      throw new ForemanError("pr_unverifiable", `couldn't look up ${id}'s PR to confirm it conflicts with main`);
+    }
+    if (info.mergeable !== "CONFLICTING") {
+      throw new ForemanError(
+        "not_conflicting",
+        `${before.pr} is ${info.mergeable ?? "of unknown mergeability"}, not CONFLICTING: nothing to send back`,
+      );
+    }
+    return this.tx(() => {
+      const t = this.get(id);
+      this.expect(t, ["approved"], "send back for a conflict");
+      this.set(id, { status: "ready", assignee: null, lease_until: null });
+      this.event(id, actor, "rework", { reason: CONFLICT_REASON, was: t.status, conflict: true, headSha: info.headSha });
+      return this.get(id);
+    });
+  }
+
   /** The approved PR was merged. */
   merged(id: string, actor: Actor, pr?: string): Task {
     // What was verified must be what merges: a PR that moved after its verdict goes back.
     const before = this.get(id);
-    const verified = [...this.events(id)].reverse().find((e) => e.type === "verified");
-    const verifiedSha = verified?.data.headSha as string | undefined;
+    const verifiedSha = this.verifiedHead(id) ?? undefined;
     const target = pr ?? before.pr;
     if (verifiedSha && target) {
       const now = this.policy.prInfo?.(target)?.headSha;
