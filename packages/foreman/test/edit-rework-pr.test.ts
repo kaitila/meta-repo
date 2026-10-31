@@ -229,3 +229,15 @@ describe("the PR (T-0017)", () => {
     expect(remoteRepo("https://gitlab.com/acme/app.git")).toBeNull();
   });
 });
+
+describe("merged() takes the verified PR only (T-0037)", () => {
+  test("a different PR argument is refused; the same one, or none, is fine", () => {
+    const { f } = setup();
+    const t = ready(f);
+    expect(toApproved(f, t.id).status).toBe("approved");
+    expect(code(() => f.merged(t.id, worker, "#12"))).toBe("pr_mismatch");
+    expect(code(() => f.merged(t.id, worker, "https://github.com/acme/app/pull/99"))).toBe("pr_mismatch");
+    expect(f.get(t.id).status).toBe("approved");
+    expect(f.merged(t.id, worker, PR).status).toBe("done");
+  });
+});

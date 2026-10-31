@@ -95,9 +95,33 @@ test("earlier reservations still count when they're ahead of the disk", () => {
   expect(f.reserve("decision", worker)).toBe(11);
 });
 
-test("a missing log file counts as empty", () => {
-  const root = repo({ "foreman.json": numbers({ decision: { file: "nope.md", pattern: "^## D(\\d+)" } }) });
-  expect(foreman(root).reserve("decision", worker)).toBe(1);
+test("a missing log file is refused, naming the path, and takes no number", () => {
+  const root = repo({ "foreman.json": numbers({ decision: { file: "docs/nope.md", pattern: "^## D(\\d+)" } }) });
+  const f = foreman(root);
+  let err: unknown;
+  try {
+    f.reserve("decision", worker);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ForemanError);
+  expect((err as ForemanError).code).toBe("invalid");
+  expect((err as Error).message).toContain("numbers.decision");
+  expect((err as Error).message).toContain("docs/nope.md");
+  // Once the file is there, numbering follows it: the refusal reserved nothing.
+  mkdirSync(join(root, "docs"));
+  writeFileSync(join(root, "docs", "nope.md"), "## D4. x\n");
+  expect(f.reserve("decision", worker)).toBe(5);
+});
+
+test("a log path that is a folder is refused, naming the path", () => {
+  const root = repo({ "logdir/x": "", "foreman.json": numbers({ decision: { file: "logdir", pattern: "^## D(\\d+)" } }) });
+  expect(() => foreman(root).reserve("decision", worker)).toThrow(/numbers\.decision.*logdir/);
+});
+
+test("a glob that matches nothing still counts as empty", () => {
+  const root = repo({ "foreman.json": numbers({ migration: { glob: "db/*.sql", pattern: "^(\\d+)_" } }) });
+  expect(foreman(root).reserve("migration", worker)).toBe(1);
 });
 
 test("a bad numbers entry is refused with a clear message", () => {
