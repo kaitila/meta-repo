@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { install, mergeSettings, TEMPLATES } from "../src/install";
+import { install, mergeSettings, TEMPLATES, unmatchedOmit } from "../src/install";
 
 const dir = mkdtempSync(join(tmpdir(), "agent-kit-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -76,6 +76,8 @@ test("a rule listed as omitted is not re-added by a second init, and init says s
     expect(r.merged).toEqual([]);
     expect(r.kept).toContain(join(".claude", "settings.json"));
     expect(r.omitted.sort()).toEqual(["Bash(rm -rf *)", "Bash(ssh *)", guard].sort());
+    // Only the typo warns; entries for baseline rules and hooks (removed or not) don't.
+    expect(r.unmatchedOmit).toEqual(["Bash(not-in-baseline *)"]);
     const after = JSON.parse(readFileSync(file, "utf8"));
     expect(after.permissions.deny).not.toContain("Bash(rm -rf *)");
     expect(after.permissions.ask).not.toContain("Bash(ssh *)");
@@ -124,4 +126,14 @@ test("a malformed omit file stops init with a clear error", () => {
   expect(() => install(target)).toThrow("agent-kit.json is not valid JSON");
   writeFileSync(join(target, ".claude", "agent-kit.json"), JSON.stringify({ omit: "Bash(ssh *)" }));
   expect(() => install(target)).toThrow('"omit" must be a list of strings');
+});
+
+test("omit entries for baseline rules the project still has don't warn; a typo does, and init still succeeds", () => {
+  expect(unmatchedOmit(baseline, ["Bash(ssh *)", "Read(**/.env)", baseline.hooks.PreToolUse[0].hooks[0].command])).toEqual([]);
+  expect(unmatchedOmit(baseline, ["Bash(sshh *)", "Bash(sshh *)"])).toEqual(["Bash(sshh *)"]);
+  const target = join(dir, "omit-typo");
+  mkdirSync(join(target, ".claude"), { recursive: true });
+  install(target);
+  writeFileSync(join(target, ".claude", "agent-kit.json"), JSON.stringify({ omit: ["Bash(ssh *)", "Bash(sshh *)"] }));
+  expect(install(target).unmatchedOmit).toEqual(["Bash(sshh *)"]);
 });

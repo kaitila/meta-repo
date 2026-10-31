@@ -19,3 +19,6 @@ for (const f of r.created) console.log(`created  ${f}`);
 for (const f of r.merged) console.log(`merged   ${f} (permission rules added)`);
 for (const f of r.kept) console.log(`kept     ${f} (already there)`);
 for (const rule of r.omitted) console.log(`omitted  ${rule} (listed in ${OMIT_FILE})`);
+for (const e of r.unmatchedOmit) {
+  console.log(`warning  omit entry "${e}" matches no baseline rule or hook command (${OMIT_FILE})`);
+}
