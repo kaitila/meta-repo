@@ -11,7 +11,12 @@ const STATUSES = [
   "needs_approval", "approved", "done", "cancelled",
 ] as const;
 
-export function buildServer(f: Foreman, me: Actor): McpServer {
+export interface ServerOptions {
+  /** create_task always files a draft, whatever `ready` says (intake: only the caller marks tasks ready). */
+  draftsOnly?: boolean;
+}
+
+export function buildServer(f: Foreman, me: Actor, opts: ServerOptions = {}): McpServer {
   const server = new McpServer({ name: "foreman", version: "0.1.0" });
   const ok = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
   const wrap =
@@ -63,7 +68,7 @@ export function buildServer(f: Foreman, me: Actor): McpServer {
         ready: z.boolean().optional(),
       },
     },
-    wrap((a: Parameters<Foreman["create"]>[0]) => f.create(a, me)),
+    wrap((a: Parameters<Foreman["create"]>[0]) => f.create(opts.draftsOnly ? { ...a, ready: false } : a, me)),
   );
   server.registerTool(
     "claim_task",
@@ -158,5 +163,6 @@ export function buildServer(f: Foreman, me: Actor): McpServer {
 
 export async function serve() {
   const me: Actor = { name: process.env.FOREMAN_ACTOR || `mcp-${process.pid}`, kind: "agent" };
-  await buildServer(Foreman.open(), me).connect(new StdioServerTransport());
+  const opts = { draftsOnly: process.env.FOREMAN_DRAFTS_ONLY === "1" };
+  await buildServer(Foreman.open(), me, opts).connect(new StdioServerTransport());
 }

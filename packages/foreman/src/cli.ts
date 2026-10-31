@@ -28,6 +28,9 @@ Tasks
                                 before work: anything; while claimed: the holder may only --add-path
   rework <id> --reason text     send a submitted, verified or approved task back to work (verify again after)
   cancel <id> --reason text
+  intake <request> [--ready] [--model m] [--budget usd]
+                                a read-only session files the request as tasks (spec, checks, paths),
+                                skipping what the board already has; drafts unless --ready; prints the ids
 
 Working (worker)
   claim [id] [--lease min]      claim a task, or the next ready one
@@ -102,6 +105,8 @@ export async function main(argv: string[]): Promise<number | null> {
       title: { type: "string" },
       "remove-check": { type: "string", multiple: true },
       "add-path": { type: "string", multiple: true },
+      model: { type: "string" },
+      budget: { type: "string" },
     },
   });
   const [cmd, ...args] = positionals;
@@ -184,6 +189,11 @@ export async function main(argv: string[]): Promise<number | null> {
       return one(f.rework(need(0, "task id"), me, o.reason ?? "")), 0;
     case "cancel":
       return one(f.cancel(need(0, "task id"), me, o.reason ?? "")), 0;
+    case "intake": {
+      const { intakeCommand } = await import("./intake");
+      const r = await intakeCommand(f, me, args.join(" "), { ready: o.ready, model: o.model, budget: o.budget });
+      return out(r.result, r.text), r.code;
+    }
     case "claim":
       return one(f.claim(args[0] ?? null, me, lease)), 0;
     case "heartbeat":

@@ -94,7 +94,8 @@ describe("buildLaunch", () => {
   test("intake disallows edits and Bash", () => {
     const { cmd } = buildLaunch(base({ role: "intake", allowedTools: ["Read", "Bash", "Write", "MultiEdit"] }));
     expect(list(cmd, "--allowedTools")).toEqual(["Read"]);
-    expect(list(cmd, "--disallowedTools")).toEqual([...EDITS, "Bash"]);
+    expect(list(cmd, "--disallowedTools").slice(0, EDITS.length + 1)).toEqual([...EDITS, "Bash"]);
+    expect(list(cmd, "--disallowedTools")).toContain("mcp__foreman__claim_task");
     const def = list(buildLaunch(base({ role: "intake" })).cmd, "--allowedTools");
     expect(def).toContain("mcp__foreman__create_task");
     expect(def).not.toContain("Bash");

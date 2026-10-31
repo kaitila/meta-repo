@@ -29,6 +29,8 @@ export interface LaunchOptions {
   allowedTools?: string[];
   /** Structured output: the session must answer with JSON matching this schema. */
   jsonSchema?: object;
+  /** MCP servers for the session ({ mcpServers: ... }); with it, the project's .mcp.json is not loaded. */
+  mcpConfig?: object;
   /** Isolated CLAUDE_CONFIG_DIR. Default: <main checkout>/.foreman/claude-config. */
   configDir?: string;
   /** The repository whose ancestors are scanned for CLAUDE.md. Default: git toplevel of cwd. */
@@ -62,7 +64,14 @@ export const ROLE_TOOLS: Record<Role, { allowed: string[]; disallowed: string[] 
     allowed: [...READ, "Bash", "Skill", "TodoWrite", ...fm("show_task", "list_tasks", "start_verify", "record_verdict", "heartbeat")],
     disallowed: [...EDIT],
   },
-  intake: { allowed: [...READ, ...fm("list_tasks", "show_task", "create_task")], disallowed: [...EDIT, "Bash"] },
+  intake: {
+    allowed: [...READ, ...fm("list_tasks", "show_task", "create_task")],
+    disallowed: [
+      ...EDIT, "Bash",
+      ...fm("next_tasks", "claim_task", "heartbeat", "report_progress", "submit_task", "start_verify",
+        "record_verdict", "mark_merged", "reserve_number", "edit_task", "rework_task"),
+    ],
+  },
 };
 
 export const ROLE_LIMITS: Record<Role, { maxTurns: number; maxBudgetUsd: number; timeoutMs: number }> = {
@@ -131,6 +140,7 @@ export function buildLaunch(opts: LaunchOptions): LaunchSpec {
   if (disallowed.length) cmd.push("--disallowedTools", disallowed.join(","));
   if (opts.model) cmd.push("--model", opts.model);
   if (opts.jsonSchema) cmd.push("--json-schema", JSON.stringify(opts.jsonSchema));
+  if (opts.mcpConfig) cmd.push("--mcp-config", JSON.stringify(opts.mcpConfig), "--strict-mcp-config");
   // After "--", so a prompt starting with "-" is never read as a flag.
   cmd.push("--", opts.prompt);
 
