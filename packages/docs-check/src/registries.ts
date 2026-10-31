@@ -21,7 +21,7 @@ export function firstCellKeys(text: string): { key: string; line: number }[] {
 export interface EnvRegistryOptions {
   /** Doc with a table whose first column lists the variables, e.g. docs/configuration.md. */
   doc: string;
-  /** Source files whose env reads must be documented (default every .ts/.tsx/.js outside tests). */
+  /** Source files whose env reads must be documented (default every .ts/.tsx/.js outside tests and `.claude/`). */
   sources?: string;
   /** Files whose env reads are known but needn't be documented (tests, scripts). */
   knownSources?: string;
@@ -41,7 +41,8 @@ export function envRegistry(opts: EnvRegistryOptions): Registry {
     fromCode(ctx: Ctx) {
       const out: { key: string; required: boolean; file: string; line: number }[] = [];
       for (const f of ctx.files) {
-        if (f.includes("node_modules/")) continue;
+        // Agent tooling (.claude/hooks reads Claude Code's and foreman's variables) isn't the app's config.
+        if (f.includes("node_modules/") || f.startsWith(".claude/")) continue;
         const required = sources.match(f) && !isTest(f);
         if (!required && !(known?.match(f) || (sources.match(f) && isTest(f)))) continue;
         const text = ctx.read(f) ?? "";
