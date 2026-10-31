@@ -1,6 +1,6 @@
 # D0006. Foreman MVP: the state machine, who may do what, and how leases end (2026-10-30)
 
-**Status:** Amended by D0008, D0009
+**Status:** Amended by D0008, D0009, D0011
 
 **Context:** [D0002](D0002-build-foreman.md), [R5.1](../research/R5.1-prior-art.md) and [R5.1b](../research/R5.1b-delegatus-yylo.md). This is what `packages/foreman` does at M3.
 

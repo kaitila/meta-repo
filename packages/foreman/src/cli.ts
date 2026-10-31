@@ -12,6 +12,15 @@ import {
   type Task,
 } from "./core";
 import { toMarkdown } from "./export";
+import { janitor } from "./janitor";
+import { mergeQueue, type QueueEntry } from "./queue";
+
+function num(v: string | undefined, fallback: number, flag: string): number {
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new ForemanError("invalid", `${flag} must be a number of at least 0, got "${v}"`);
+  return n;
+}
 
 const HELP = `foreman: a task layer for AI coding agents in parallel git worktrees
 
@@ -49,6 +58,12 @@ Running agents
                                 verifier once it is submitted; at most --max sessions at once, never two
                                 tasks with overlapping paths; --once: see only what fits now through
                                 verification, then stop; --budget: each session's limit in USD
+Running the loop
+  merge-queue [--once] [--dry-run] [--settle-seconds 30] [--interval 60]
+                                merge approved PRs one at a time: settled green checks at the
+                                verified commit; a PR that conflicts with main goes back to ready
+  janitor [--stuck-hours 24] [--dry-run]
+                                reclaim expired leases, remove finished tasks' worktrees, list stuck tasks
 
 Housekeeping
   reclaim                       release claims whose lease ran out, or whose pinned process is gone
@@ -113,6 +128,10 @@ export async function main(argv: string[]): Promise<number | null> {
       once: { type: "boolean" },
       model: { type: "string" },
       budget: { type: "string" },
+      "dry-run": { type: "boolean" },
+      "settle-seconds": { type: "string" },
+      interval: { type: "string" },
+      "stuck-hours": { type: "string" },
     },
   });
   const [cmd, ...args] = positionals;
@@ -254,6 +273,28 @@ export async function main(argv: string[]): Promise<number | null> {
         ? `${sessions.map((s) => `${s.task} ${s.role}: ${s.status}${s.error ? ` (${s.error})` : ""}`).join("\n")}\n${sessions.length} sessions, $${cost.toFixed(2)}`
         : "nothing to dispatch";
       return out(sessions, text), 0;
+    case "merge-queue": {
+      const actor = process.env.FOREMAN_ACTOR ? me : { name: "merge-queue", kind: me.kind };
+      const show = (r: QueueEntry[]) =>
+        out(r, r.map((e) => `${e.id}  ${e.action.padEnd(15)} ${e.reason}`).join("\n") || "nothing approved");
+      await mergeQueue(f, actor, {
+        dryRun: o["dry-run"],
+        settleSeconds: num(o["settle-seconds"], 30, "--settle-seconds"),
+        intervalSeconds: num(o.interval, 60, "--interval"),
+        onPass: show,
+      return 0;
+    }
+    case "janitor": {
+      const actor = process.env.FOREMAN_ACTOR ? me : { name: "janitor", kind: me.kind };
+      const r = await janitor(f, actor, { dryRun: o["dry-run"], stuckHours: num(o["stuck-hours"], 24, "--stuck-hours") });
+      const would = o["dry-run"] ? "would " : "";
+      const lines = [
+        r.reclaimed.length ? `${would}reclaim ${r.reclaimed.join(", ")}` : "no expired claims",
+        ...r.removed.map((x) => `${x.id}  ${would}remove ${x.worktree}${x.branchDeleted ? " (and its merged branch)" : ""}${x.portsReleased ? " (ports released)" : ""}`),
+        ...r.kept.map((x) => `${x.id}  kept ${x.worktree}: ${x.reason}`),
+        ...r.stuck.map((x) => `${x.id}  stuck ${x.status} for ${x.hours}h${x.assignee ? ` @${x.assignee}` : ""}`),
+      ];
+      return out(r, lines.join("\n")), 0;
     }
     case "reclaim": {
       const ids = f.reclaim(me);
