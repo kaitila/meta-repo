@@ -2,7 +2,7 @@
 
 A local task layer for AI coding agents working in parallel git worktrees. Tasks have acceptance checks. A worker claims a task, someone else verifies it, and sign-off depends on risk. There is no server, account or hosted service.
 
-Status: MVP (step M3), plus the launch adapter, the merge queue and the janitor from M6 ([D0011](../../docs/decisions/D0011-foreman-dispatch.md)). The dispatcher and the web board are still to come. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
+Status: MVP (step M3), plus the launch adapter, the merge queue, the janitor and a local web board from M6 ([D0011](../../docs/decisions/D0011-foreman-dispatch.md)). The dispatcher is still to come. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
 
 ## How it works
 
