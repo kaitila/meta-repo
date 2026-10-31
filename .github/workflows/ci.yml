@@ -32,7 +32,14 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      TEST_KIT_DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/test_kit_test
     steps:
+      # Started first and in the background: it boots while the rest installs.
+      - name: Start Postgres
+        run: >
+          docker run -d --name pg -p 127.0.0.1:5432:5432 -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci
+          postgres:16 -c fsync=off -c synchronous_commit=off -c full_page_writes=off
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -40,6 +47,10 @@ jobs:
         with:
           bun-version: 1.3.5
       - run: bun install --frozen-lockfile
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 60); do docker exec pg pg_isready -U ci >/dev/null 2>&1 && exit 0; sleep 1; done
+          docker logs pg; exit 1
       # The same command agents and people run locally (D0004).
       - run: bun run check
       - name: Known vulnerabilities in dependencies
