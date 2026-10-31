@@ -339,6 +339,15 @@ export function writeTargets(head: string, args: string[]): string[] {
     return head === "mv" ? rest : [rest[rest.length - 1]!];
   }
   if (head === "dd") return args.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+  if (head === "find" && args.some((a) => a === "-delete" || a === "-exec" || a === "-execdir" || a === "-ok")) {
+    // find deletes or runs commands under its start directories (the words before the first expression).
+    const start: string[] = [];
+    for (const a of args) {
+      if (a.startsWith("-") || a === "(" || a === "!" || a === "\\(") break;
+      start.push(a);
+    }
+    return start.length ? start : ["."];
+  }
   if (head === "curl" || head === "wget") {
     // curl -o FILE / --output FILE / -sSLo FILE; wget -O FILE / --output-document FILE.
     const short = head === "curl" ? "o" : "O";
@@ -383,7 +392,12 @@ export function gitWriteTargets(args: string[]): string[] {
   if (sub === "rm" || sub === "mv") return plain;
   if (sub === "checkout") {
     const dd = rest.indexOf("--");
-    return dd >= 0 ? rest.slice(dd + 1) : [];
+    if (dd >= 0) return rest.slice(dd + 1);
+    // `git checkout <ref> <path>...`: everything after the ref is a path. A single word is
+    // most often a branch to switch to, which writes no file of its own.
+    const vals = new Set(["-b", "-B", "--orphan"]);
+    const words = rest.filter((a, k) => !a.startsWith("-") && !vals.has(rest[k - 1] ?? ""));
+    return words.length >= 2 ? words.slice(1) : [];
   }
   if (sub === "restore") {
     // --staged alone touches only the index, not files.
@@ -398,7 +412,11 @@ export function gitWriteTargets(args: string[]): string[] {
 function readsScriptFromStdin(head: string, args: string[]): boolean {
   if (args.some((a) => ["-c", "-e", "-E", "--eval", "-p", "--print", "-m"].includes(a))) return false; // code or module given
   if (args.includes("-s") || args.includes("-")) return true;
-  return !args.some((a) => !a.startsWith("-")); // no script file named: stdin is the script
+  // Only a word that looks like a script file names one. Anything else may be an option's
+  // value (`bash -o pipefail`, `python3 -W ignore`), so the heredoc is treated as code:
+  // when unsure, check it (verifier finding on T-0027).
+  const looksLikeScript = (a: string) => !a.startsWith("-") && (a.includes("/") || /\.(sh|bash|zsh|py|js|mjs|cjs|ts|tsx|rb|pl|php)$/.test(a));
+  return !args.some(looksLikeScript);
 }
 
 function inlineCode(head: string, args: string[]): string[] {

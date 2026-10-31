@@ -38,6 +38,10 @@ describe("more write forms checked against the task's paths (T-0014)", () => {
     "git restore other/a.ts",
     "git -C . restore --worktree other/a.ts",
     "echo x >| other/f.txt",
+    "git checkout HEAD other/a.ts",
+    "git checkout main src/a.ts other/b.ts",
+    "find other -name '*.tmp' -delete",
+    "find other src -type f -exec rm {} +",
   ])("blocks: %s", (cmd) => {
     expect(checkCommand(cmd, working)).toContain("outside your task's paths");
   });
@@ -53,6 +57,10 @@ describe("more write forms checked against the task's paths (T-0014)", () => {
     "git restore --staged other/a.ts", // index only
     "git checkout feature-x", // switching branches isn't a file write
     "truncate -s 0 src/log.txt",
+    "git checkout -b new-branch main",
+    "find src -name '*.tmp' -delete",
+    "find other -name '*.md'", // finding isn't writing
+    "rm -r src/build", // a directory inside the paths
   ])("allows: %s", (cmd) => {
     expect(checkCommand(cmd, working)).toBeNull();
   });
@@ -72,6 +80,13 @@ describe("a heredoc is code only where stdin is the script (T-0027)", () => {
     // the false positive the verifier hit: a heredoc for cat, and an interpreter elsewhere on the line
     expect(checkCommand("cat > src/notes.md <<'EOF'\nload('.env')\nEOF\nbun src/x.ts", working)).toBeNull();
   });
+  test("an option's value is not a script name: the heredoc is code (verifier finding)", () => {
+    expect(checkCommand("bash -o pipefail <<'EOF'\ngit push origin main\nEOF", ctx())).not.toBeNull();
+    expect(checkCommand("python3 -W ignore <<'EOF'\nprint(open('.env').read())\nEOF", ctx())).toContain(".env");
+    expect(checkCommand("node --no-warnings <<'EOF'\nrequire('fs').readFileSync('.env')\nEOF", ctx())).toContain(".env");
+    expect(checkCommand("bash ./deploy <<'EOF'\ngit push origin main\nEOF", ctx())).toBeNull(); // a path names a script
+  });
+
   test("stdin as the script is still checked", () => {
     expect(checkCommand("cat <<'EOF' | python3\nprint(open('.env').read())\nEOF", ctx())).toContain(".env");
     expect(checkCommand("python3 - <<'EOF'\nprint(open('.env').read())\nEOF", ctx())).toContain(".env");
@@ -103,6 +118,11 @@ describe("the hook fails closed when bun is missing (T-0026)", () => {
     } finally {
       rmSync(bin, { recursive: true, force: true });
     }
+  });
+
+  test("this repository runs the same hook command as the template", () => {
+    const repo = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "..", ".claude/settings.json"), "utf8"));
+    expect(repo.hooks.PreToolUse).toEqual(settings.hooks.PreToolUse);
   });
 
   test("with bun present, it runs the guard", () => {
