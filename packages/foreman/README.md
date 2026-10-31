@@ -2,7 +2,7 @@
 
 A local task layer for AI coding agents working in parallel git worktrees. Tasks have acceptance checks. A worker claims a task, someone else verifies it, and sign-off depends on risk. There is no server, account or hosted service.
 
-Status: MVP (step M3), plus the launch adapter, the dispatcher, intake, the merge queue and the janitor from M6 ([D0011](../../docs/decisions/D0011-foreman-dispatch.md)). The web board is still to come. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
+Status: MVP (step M3), plus M6: the launch adapter, the dispatcher, intake, the merge queue, the janitor and a local web board ([D0011](../../docs/decisions/D0011-foreman-dispatch.md)). The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
 
 ## How it works
 
@@ -57,6 +57,7 @@ foreman merge-queue --once         # merge one approved PR whose checks are gree
 foreman merge-queue                # the same, every 60 s until stopped (--interval, --settle-seconds 30)
 foreman janitor --dry-run          # reclaim, clean up finished tasks, list stuck ones (--stuck-hours 24)
 foreman intake "Add a stage filter to /investors"   # a session files it as draft tasks (see Intake)
+fm serve                           # web board on http://127.0.0.1:4499 (--port 0 picks a free one)
 ```
 
 Every command takes `--json`.
@@ -80,6 +81,24 @@ Both run as agents. Without `FOREMAN_ACTOR` they act as `merge-queue` and `janit
   - releases that worktree's test-kit ports, if `@meta-repo/test-kit` is installed;
   - deletes the task's local branch only if it is already in `main` or `origin/main`;
   - lists tasks in `claimed`, `in_progress`, `in_review` or `verifying` for longer than `--stuck-hours` since they entered that state.
+
+## Board
+
+`fm serve [--port 4499]` runs a web board for the repo's tasks. It listens on 127.0.0.1 only and prints its URL and a one-time approve token to its own terminal. `--port 0` picks a free port.
+
+- **The page:** one lane per status, `draft` to `cancelled`. A card shows the id, title, risk and assignee. Click it for the spec, the acceptance checks with each one's latest verdict, the PR link and the history. `/#T-0001` opens that task. It polls for changes every 2 seconds.
+- **Offline:** CSS and JS are inline, with no external assets. It follows the system's dark or light mode and works at phone width.
+- **API** (read-only JSON):
+  - `GET /api/tasks`: all tasks.
+  - `GET /api/tasks/:id`: the task, its checks with the latest verdict, and its events.
+  - `GET /api/events?since=<id>`: events after that id.
+- **Approving:** `POST /api/tasks/:id/approve` is the one write. It needs the header `x-foreman-token: <token>`, and if the browser sends an `Origin` it must be the board's own; otherwise 403. The approver is `FOREMAN_ACTOR` or `USER`, as a person.
+- **From an agent:** started from an agent session (`CLAUDE_CODE_CHILD_SESSION=1` or `FOREMAN_AGENT=1`), or without an interactive terminal (stdin and stdout), the board prints no token and approving is off, because the agent would read the token from its own output. Like `approve`, this is a guardrail, not a boundary.
+- **Safety:**
+  - The token is 32 random bytes in hex. It never appears in a page or an API response.
+  - A request whose `Host` isn't `127.0.0.1:<port>` or `localhost:<port>` gets 421, which blocks DNS rebinding.
+  - Headers: a CSP of `default-src 'self'` with a per-response nonce for the inline script and style, `x-frame-options: DENY`, `referrer-policy: no-referrer`, `nosniff` and `no-store`.
+  - Task text reaches the page only through `textContent`. The initial state is JSON with `<`, `>` and `&` escaped.
 
 ## Agents
 
