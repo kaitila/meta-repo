@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "examples/*"
   ],
   "scripts": {
-    "check": "bun run typecheck && bun run docs:check && bun test",
-    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/test-kit && tsc --noEmit -p packages/docs-check",
-    "test": "bun test",
+    "check": "bun run typecheck && bun run docs:check && bun run test && bun run demo:check",
+    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/test-kit && tsc --noEmit -p packages/docs-check && tsc --noEmit -p presets",
+    "test": "bun test ./packages ./presets/test",
+    "demo:check": "bun run --cwd examples/demo-app check",
+    "demo:generate": "bun presets/generate.ts bun-ts-postgres examples/demo-app --force",
     "live-test": "bun packages/agent-kit/scripts/live-test.ts",
+    "live-launch": "bun packages/foreman/scripts/live-launch.ts",
     "link": "cd packages/foreman && bun link",
     "docs:check": "bun packages/docs-check/src/cli.ts"
   },

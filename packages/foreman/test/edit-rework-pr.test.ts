@@ -42,7 +42,11 @@ function toApproved(f: Foreman, id: string, branch = "t-branch") {
   f.progress(id, worker, { branch });
   f.submit(id, worker, { pr: PR });
   f.startVerify(id, verifier);
-  return f.recordVerify(id, verifier, f.get(id).acceptance.map((c) => ({ check: c.id, pass: true, evidence: "ok" })));
+  return f.recordVerify(id, verifier, passAll(f, id));
+}
+
+function passAll(f: Foreman, id: string) {
+  return f.get(id).acceptance.map((c) => ({ check: c.id, pass: true, evidence: "ok" }));
 }
 
 describe("edit (T-0009)", () => {
@@ -183,6 +187,37 @@ describe("the PR (T-0017)", () => {
     expect(toApproved(f, t.id).status).toBe("approved");
     (f.policy as { prInfo?: unknown }).prInfo = () => null;
     expect(code(() => f.merged(t.id, worker))).toBe("pr_unverifiable");
+  });
+
+  test("a GitHub PR verified while gh was down can't be marked merged; rework and verify again (T-0028)", () => {
+    const { f } = setup();
+    const p = f.policy as { prInfo?: Policy["prInfo"] };
+    const working = p.prInfo;
+    const t = ready(f);
+    f.claim(t.id, worker);
+    f.progress(t.id, worker, { branch: "t-branch" });
+    f.submit(t.id, worker, { pr: PR });
+    f.startVerify(t.id, verifier);
+    p.prInfo = () => null; // gh down at verdict time: no commit recorded
+    const v = f.recordVerify(t.id, verifier, passAll(f, t.id));
+    expect(v.status).toBe("approved");
+    expect(f.events(t.id).find((e) => e.type === "verified")?.data.headSha).toBeUndefined();
+    p.prInfo = working; // gh back: the PR looks fine, but the verdict wasn't about a known commit
+    expect(code(() => f.merged(t.id, worker))).toBe("pr_unverifiable");
+    expect(f.get(t.id).status).toBe("approved");
+    f.rework(t.id, worker, "verdict recorded no commit");
+    expect(toApproved(f, t.id).status).toBe("approved");
+    expect(f.merged(t.id, worker).status).toBe("done");
+  });
+
+  test("a non-GitHub PR verified without a commit still merges (local workflows)", () => {
+    const { f } = setup({ origin: null });
+    const t = ready(f);
+    f.claim(t.id, worker);
+    f.submit(t.id, worker, { pr: "#12" });
+    f.startVerify(t.id, verifier);
+    expect(f.recordVerify(t.id, verifier, passAll(f, t.id)).status).toBe("approved");
+    expect(f.merged(t.id, worker).status).toBe("done");
   });
 
   test("repo names from PR URLs and remotes", () => {

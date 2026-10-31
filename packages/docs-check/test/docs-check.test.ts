@@ -83,15 +83,44 @@ describe("decisions", () => {
     expect(kinds(root)).toEqual([]);
   });
 
-  test("a gap and a duplicate number fail (what parallel branches produce)", () => {
+  test("a duplicate number fails (what branches that count files themselves produce)", () => {
     const root = withIndex({
       "docs/decisions/D0001-a.md": decision(1),
       "docs/decisions/D0003-c.md": decision(3),
       "docs/decisions/D0003-other.md": decision(3),
     });
+    const k = kinds(root).filter((x) => x.startsWith("decision-number"));
+    expect(k).toEqual(["decision-number D0003 is used by 2 files", "decision-number D0003 is used by 2 files"]);
+  });
+
+  test("a gap passes: lower numbers on open PRs, or reserved and abandoned", () => {
+    // D0002 and D0004 are on other branches or were never used; D0005 is this branch's.
+    const root = withIndex({
+      "docs/decisions/D0001-a.md": decision(1, { status: "Amended by D0005" }),
+      "docs/decisions/D0003-c.md": decision(3),
+      "docs/decisions/D0005-e.md": decision(5),
+    });
+    expect(kinds(root)).toEqual([]);
+    const index = run(root, {}, { today: TODAY }).index!.text;
+    expect(index).toContain("3 decisions");
+    expect(index.indexOf("[D0001]")).toBeLessThan(index.indexOf("[D0003]"));
+    expect(index.indexOf("[D0003]")).toBeLessThan(index.indexOf("[D0005]"));
+    expect(index).not.toContain("D0002");
+  });
+
+  test("a status naming a number in the gap fails: that decision isn't here", () => {
+    const root = withIndex({
+      "docs/decisions/D0001-a.md": decision(1, { status: "Superseded by D0002" }),
+      "docs/decisions/D0003-c.md": decision(3),
+    });
     const k = kinds(root);
-    expect(k).toContain("decision-number missing D0002");
-    expect(k.filter((x) => x.startsWith("decision-number D0003")).length).toBe(2);
+    expect(k).toContain("decision-status D0002 doesn't exist");
+    expect(k.every((x) => x.endsWith("D0002") || x.includes("D0002 "))).toBe(true); // nothing else fails
+  });
+
+  test("D0000 fails: numbers start at 1", () => {
+    const root = withIndex({ "docs/decisions/D0000-zero.md": decision(0) });
+    expect(kinds(root)).toEqual(["decision-number numbers start at 1"]);
   });
 
   test("status grammar, targets that don't exist or aren't later, and sections", () => {
