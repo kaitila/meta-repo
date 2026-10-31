@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/test-kit && tsc --noEmit -p packages/docs-check",
     "test": "bun test",
     "live-test": "bun packages/agent-kit/scripts/live-test.ts",
+    "live-launch": "bun packages/foreman/scripts/live-launch.ts",
     "link": "cd packages/foreman && bun link",
     "docs:check": "bun packages/docs-check/src/cli.ts"
   },
