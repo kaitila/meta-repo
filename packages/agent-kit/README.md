@@ -8,6 +8,18 @@ bun packages/agent-kit/src/cli.ts init [dir]
 
 `init` adds the templates to a repository and never overwrites a file. The one exception is `.claude/settings.json`: if the project already has one, the baseline's permission rules are added to it (a union) and the project's own rules and other keys are kept.
 
+**Removing a baseline rule on purpose:** delete it from `.claude/settings.json` and list it in `.claude/agent-kit.json`, or the next `init` adds it back ([D0014](../../docs/decisions/D0014-init-omit-file.md)): <!-- docs-check: elsewhere -->
+
+```json
+{ "omit": ["Bash(ssh *)", "Bash(docker *)"] }
+```
+
+- Each entry is a permission rule, written exactly as in the baseline, or a hook's `command` (that skips the hook group running it).
+- `init` prints each baseline rule it skipped: `omitted  Bash(ssh *) (listed in .claude/agent-kit.json)`.
+- The omit list only stops rules being added. A rule the project still has stays, and entries that match no baseline rule are ignored.
+- It applies to a first install too. A malformed file stops `init` with an error, before anything is written.
+- `init` never creates or changes this file.
+
 ## What's in it
 
 **`templates/.claude/settings.json`**, the permission baseline ([D0007](../../docs/decisions/D0007-guardrail-layers.md)):
