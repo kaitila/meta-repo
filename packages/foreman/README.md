@@ -57,6 +57,7 @@ foreman merge-queue --once         # merge one approved PR whose checks are gree
 foreman merge-queue                # the same, every 60 s until stopped (--interval, --settle-seconds 30)
 foreman janitor --dry-run          # reclaim, clean up finished tasks, list stuck ones (--stuck-hours 24)
 foreman intake "Add a stage filter to /investors"   # a session files it as draft tasks (see Intake)
+fm dispatch [--max 3] [--once]     # run workers and verifiers until nothing more can start
 fm serve                           # web board on http://127.0.0.1:4499 (--port 0 picks a free one)
 ```
 
@@ -150,6 +151,8 @@ const r = await launch({
 
 `fm dispatch [--max 3] [--once] [--model m] [--budget usd]` (`src/dispatch.ts`) runs workers and verifiers through the launch adapter until nothing more can start.
 
+The design and its rules are in [D0011](../../docs/decisions/D0011-foreman-dispatch.md).
+
 - **Slots:** at most `--max` sessions at once, workers and verifiers together. Submitted tasks get a verifier before new tasks get a worker.
 - **No clashes:** a ready task waits while its declared paths overlap those of a task that is `claimed`, `in_progress`, `in_review` or `verifying`. A task that declares no paths overlaps every task.
 - **A worker per task:** the dispatcher claims the task as `worker-<task>` and makes `.claude/worktrees/<task>` on a new branch `<task>-<title>` from `origin/main`. It records both with `progress`, then starts a worker with the `ship` skill. A task back for rework keeps its worktree, or its branch if the worktree is gone. If the worktree can't be made, the task goes back to `ready`.
@@ -163,7 +166,7 @@ Tests use a fake launcher (`Dispatcher`'s `launcher` option). `FOREMAN_LIVE_DISP
 
 ## Intake
 
-`fm intake "<request>" [--ready] [--model m] [--budget usd]` turns a free-text request into tasks (step M6). It starts an `intake` session through the launch adapter, in the current directory:
+`fm intake "<request>" [--ready] [--model m] [--budget usd]` turns a free-text request into tasks (step M6). It starts an `intake` session through the launch adapter, in the current directory (see [D0011](../../docs/decisions/D0011-foreman-dispatch.md)):
 
 - **What the session can do:** read the code (`Read`, `Glob`, `Grep`) and use foreman's `list_tasks`, `show_task` and `create_task`. Nothing else: no edits, no `Bash`, no other foreman tools.
 - **Its foreman:** the session gets this foreman's own MCP server, by the absolute path of its `cli.ts`, and no other server, so it works in a repo whose `.mcp.json` doesn't list foreman. The server runs as `intake-<run id>`, which is what `created_by` shows, and with `FOREMAN_DRAFTS_ONLY=1`, so `create_task` files drafts whatever the model asks.
