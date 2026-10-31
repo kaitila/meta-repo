@@ -48,6 +48,7 @@ Housekeeping
   reserve <kind> [--task id]    next free number (kind "decision" also reads docs/decisions)
   export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
   mcp                           run the MCP server on stdio
+  serve [--port 4499]           local web board on 127.0.0.1; approving there needs the token it prints
 
 Who you are: FOREMAN_ACTOR names you; CLAUDE_CODE_CHILD_SESSION=1 (a command Claude Code runs) or
 FOREMAN_AGENT=1 marks you as an agent.
@@ -102,6 +103,7 @@ export async function main(argv: string[]): Promise<number | null> {
       title: { type: "string" },
       "remove-check": { type: "string", multiple: true },
       "add-path": { type: "string", multiple: true },
+      port: { type: "string" },
     },
   });
   const [cmd, ...args] = positionals;
@@ -117,6 +119,17 @@ export async function main(argv: string[]): Promise<number | null> {
 
   const f = Foreman.open();
   const me = actorFromEnv();
+  if (cmd === "serve") {
+    const port = o.port === undefined ? 4499 : Number(o.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) throw new ForemanError("invalid", `bad port ${o.port}`);
+    const { startBoard } = await import("./board/server");
+    // An agent that starts the board would read the token from its own output: no approving then.
+    const board = startBoard({ foreman: f, port, approver: me.kind === "human" ? me : null });
+    console.log(`foreman board: ${board.url}`);
+    if (board.token) console.log(`approve token (paste it on the page; it is shown only here): ${board.token}`);
+    else console.log("read-only: started from an agent session, so approving from the page is off");
+    return null;
+  }
   const lease = o.lease ? Number(o.lease) : undefined;
   const need = (i: number, what: string) => {
     const v = args[i];
