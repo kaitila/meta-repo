@@ -1,0 +1,14 @@
+{
+  "name": "@meta-repo/test-kit",
+  "version": "0.1.0",
+  "description": "Test infrastructure for Bun + Postgres projects worked on by parallel agents: worktree slots, fast DB reset, fixtures, fake network, fake LLM, affected tests",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": { "affected-tests": "src/affected-cli.ts" },
+  "dependencies": {
+    "postgres": "3.4.9"
+  }
+}

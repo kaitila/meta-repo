@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "check": "bun run typecheck && bun run docs:check && bun test",
-    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/docs-check",
+    "typecheck": "tsc --noEmit -p packages/foreman && tsc --noEmit -p packages/agent-kit && tsc --noEmit -p packages/test-kit && tsc --noEmit -p packages/docs-check",
     "test": "bun test",
     "live-test": "bun packages/agent-kit/scripts/live-test.ts",
     "link": "cd packages/foreman && bun link",
