@@ -61,7 +61,7 @@ Running the loop
 
 Housekeeping
   reclaim                       release claims whose lease ran out
-  reserve <kind> [--task id]    next free number (kind "decision" also reads docs/decisions)
+  reserve <kind> [--task id]    next free number (also reads what is on disk: foreman.json "numbers")
   export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
   mcp                           run the MCP server on stdio
 
@@ -149,8 +149,9 @@ export async function main(argv: string[]): Promise<number | null> {
 
   switch (cmd) {
     case "add": {
-      const risk = (o.risk ?? "review") as Task["risk"];
-      if (!["auto", "review", "human"].includes(risk)) throw new ForemanError("invalid", `bad risk ${risk}`);
+      // No --risk: core picks it from the paths (D0008). Don't default to "review" here.
+      const risk = o.risk as Task["risk"] | undefined;
+      if (risk !== undefined && !["auto", "review", "human"].includes(risk)) throw new ForemanError("invalid", `bad risk ${risk}`);
       const t = f.create(
         {
           title: args.join(" "),

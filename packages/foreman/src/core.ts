@@ -2,9 +2,7 @@
 // The CLI and the MCP server are thin layers over this; nothing here knows
 // which agent tool is calling (D0005).
 import type { Database } from "bun:sqlite";
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
-import { gitPolicy, isProtected, mayTouchProtected, type Policy, prRepo } from "./policy";
+import { gitPolicy, highestOnDisk, isProtected, mayTouchProtected, type Policy, prRepo } from "./policy";
 import { dbPath, openDb, repoRoot } from "./store";
 
 export type Risk = "auto" | "review" | "human";
@@ -615,6 +613,10 @@ export class Foreman {
     const before = this.get(id);
     const verifiedSha = this.verifiedHead(id) ?? undefined;
     const target = pr ?? before.pr;
+    // A GitHub PR's verdict always records its commit; none means gh couldn't say then, so we can't tell now.
+    if (verified && !verifiedSha && target && prRepo(target)) {
+      throw new ForemanError("pr_unverifiable", `${id} was verified without a recorded commit for ${target}: rework and verify again`);
+    }
     if (verifiedSha && target) {
       const now = this.policy.prInfo?.(target)?.headSha;
       if (!now) {
@@ -668,21 +670,17 @@ export class Foreman {
 
   /**
    * Hand out the next number for something parallel PRs would otherwise clash on.
-   * "decision" looks at docs/decisions/Dnnnn-*.md on disk as well as earlier reservations.
+   * The numbers already on disk count as well as earlier reservations: for "decision",
+   * docs/decisions/Dnnnn-*.md, unless foreman.json's `numbers` names another source.
    */
   reserve(kind: string, actor: Actor, taskId?: string): number {
     return this.tx(() => {
       if (taskId) this.get(taskId);
-      let onDisk = 0;
-      if (kind === "decision" && this.root) {
-        try {
-          for (const f of readdirSync(join(this.root, "docs", "decisions"))) {
-            const m = /^D(\d+)/.exec(f);
-            if (m) onDisk = Math.max(onDisk, Number(m[1]));
-          }
-        } catch {
-          // no decisions folder yet
-        }
+      let onDisk: number;
+      try {
+        onDisk = highestOnDisk(this.root, kind);
+      } catch (e) {
+        throw new ForemanError("invalid", (e as Error).message);
       }
       const { r } = this.db
         .query(`SELECT COALESCE(MAX(value), 0) AS r FROM reservations WHERE kind = ?`)
