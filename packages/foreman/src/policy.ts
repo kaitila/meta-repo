@@ -31,6 +31,22 @@ export interface Policy {
   protectedPaths: string[];
   /** Files the task's PR (or, without a GitHub PR, its branch) changes; null if unknown. */
   changedFiles(task: { branch: string | null; pr: string | null }): string[] | null;
+  /** A GitHub PR's head branch and commit; null if it can't be looked up. */
+  prInfo?(pr: string): { head: string; headSha: string } | null;
+  /** This repository on GitHub, as "owner/name" (from the origin remote); null if unknown. */
+  originRepo?(): string | null;
+}
+
+/** "owner/name" from a GitHub PR URL. */
+export function prRepo(pr: string): string | null {
+  const m = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/\d+\/?$/.exec(pr);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/** "owner/name" from a git remote URL (https or ssh). */
+export function remoteRepo(url: string): string | null {
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}` : null;
 }
 
 export function loadProtected(root: string | null): string[] {
@@ -81,6 +97,22 @@ export function gitPolicy(root: string | null, run: Run = defaultRun): Policy {
   const git = (r: string, args: string[]) => run(["git", ...args], r);
   return {
     protectedPaths: loadProtected(root),
+    prInfo(pr) {
+      if (!root || !GITHUB_PR.test(pr)) return null;
+      const out = run(["gh", "pr", "view", pr, "--json", "headRefName,headRefOid"], root);
+      if (out === null) return null;
+      try {
+        const j = JSON.parse(out) as { headRefName?: string; headRefOid?: string };
+        return j.headRefName && j.headRefOid ? { head: j.headRefName, headSha: j.headRefOid } : null;
+      } catch {
+        return null;
+      }
+    },
+    originRepo() {
+      if (!root) return null;
+      const url = git(root, ["remote", "get-url", "origin"]);
+      return url ? remoteRepo(url) : null;
+    },
     changedFiles({ branch, pr }) {
       if (!root) return null;
       // The PR is what gets merged: ask GitHub for its files. A worker can't steer this

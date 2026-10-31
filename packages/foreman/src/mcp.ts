@@ -126,6 +126,33 @@ export function buildServer(f: Foreman, me: Actor): McpServer {
     },
     wrap(({ kind, task }: { kind: string; task?: string }) => ({ kind, value: f.reserve(kind, me, task) })),
   );
+  server.registerTool(
+    "edit_task",
+    {
+      description:
+        "Change a task. Before work starts, anything (only a person lowers risk). While you hold it, you may only add paths, when the work turns out to touch more files. Not while under review: use rework_task first.",
+      inputSchema: {
+        ...id,
+        title: z.string().optional(),
+        spec: z.string().optional(),
+        addChecks: z.array(z.string()).optional(),
+        removeChecks: z.array(z.string()).optional(),
+        paths: z.array(z.string()).optional(),
+        addPaths: z.array(z.string()).optional(),
+        risk: z.enum(["auto", "review", "human"]).optional(),
+      },
+    },
+    wrap(({ id, ...c }: { id: string } & Parameters<Foreman["edit"]>[2]) => f.edit(id, me, c)),
+  );
+  server.registerTool(
+    "rework_task",
+    {
+      description:
+        "Send a task you worked on back to work after it was submitted, verified or approved: its PR is changing again, or a gap was found. It must be claimed and verified again.",
+      inputSchema: { ...id, reason: z.string() },
+    },
+    wrap(({ id, reason }: { id: string; reason: string }) => f.rework(id, me, reason)),
+  );
   return server;
 }
 

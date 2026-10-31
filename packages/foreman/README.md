@@ -41,7 +41,9 @@ FOREMAN_ACTOR=verifier-1 foreman verify T-0001
 FOREMAN_ACTOR=verifier-1 foreman verdict T-0001 --result "c1:pass:bun test 40 pass" --result "c2:pass:seen on /investors"
 foreman approve                    # people only, in a terminal: everything waiting, after one yes
 foreman approve T-0001 T-0002      # or just these
-foreman merged T-0001
+foreman merged T-0001              # refused if the PR moved after it was verified
+foreman edit T-0001 --add-path "docs/**"   # while working: the holder may only add paths
+foreman rework T-0001 --reason "gap found after the verdict"   # back to ready; verify again
 foreman reserve decision           # next free Dnnnn, so parallel PRs never clash
 foreman export T-0001              # docs/tasks/T-0001.md
 ```
@@ -54,5 +56,9 @@ Every command takes `--json`.
   ```json
   { "mcpServers": { "foreman": { "type": "stdio", "command": "bun", "args": ["packages/foreman/src/cli.ts", "mcp"] } } }
   ```
-- **MCP tools:** `list_tasks`, `next_tasks`, `show_task`, `create_task`, `claim_task`, `heartbeat`, `report_progress`, `submit_task`, `start_verify`, `record_verdict`, `mark_merged`, `reserve_number`. There is no approve tool.
+- **MCP tools:** `list_tasks`, `next_tasks`, `show_task`, `create_task`, `claim_task`, `heartbeat`, `report_progress`, `submit_task`, `start_verify`, `record_verdict`, `mark_merged`, `reserve_number`, `edit_task`, `rework_task`. There is no approve tool.
+- **The PR** ([D0009](../../docs/decisions/D0009-edit-rework-verified-head.md)):
+  - **On submit:** a GitHub PR must be on this repo, and its branch must be the task's.
+  - **At the verdict:** foreman records the PR's head commit.
+  - **On merge:** `merged` is refused if the PR has changed since. Rework and verify again.
 - **Identity:** `FOREMAN_ACTOR` names the caller. A command Claude Code runs for the model (`CLAUDE_CODE_CHILD_SESSION=1`) counts as an agent. IDE terminals don't, even though Claude Code sets `CLAUDECODE=1` there. This is a guardrail, not a security boundary: branch protection and the verifier are the hard limits.
