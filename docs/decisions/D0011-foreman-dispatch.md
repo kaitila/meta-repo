@@ -7,6 +7,12 @@
 **Chosen:**
 - **Launch adapter** (`foreman/src/launch.ts`). One function starts a headless Claude Code session for a role (worker, verifier, intake) and returns {result, structured output, cost, turns, exit}. Each session gets:
   - **Its own config directory**, holding only a symlink to the person's login. The person's settings, hooks and memory don't leak into it.
+  - **How this was established (2026-10-31, Haiku, about $0.002 per run):**
+    - Plain `--setting-sources project,local` still loaded the person's `/root/.claude/CLAUDE.md`, found as an ancestor of the repo.
+    - `--bare` lost the login ("Not logged in").
+    - The separate config dir kept the login and the project's MCP tools, but still saw the ancestor file.
+    - Adding `claudeMdExcludes` made the session answer that no instruction mentioned the marker.
+    - T-0010 turns this into a rerunnable live test.
   - **`claudeMdExcludes`** for every CLAUDE.md above the repository: a repo under the home directory otherwise picks up the person's global instructions as project instructions (seen in a test).
   - **Explicit tools**, `--max-turns`, `--max-budget-usd` and a wall-clock timeout that kills the process group.
   - **For a verifier:** no edit tools.
