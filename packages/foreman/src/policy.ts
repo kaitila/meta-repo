@@ -78,7 +78,7 @@ export function loadProtected(root: string | null): string[] {
   return protectedPaths ? [...new Set([...protectedPaths, "foreman.json"])] : DEFAULT_PROTECTED;
 }
 
-/** The highest number of `kind` already on disk (0 if none, or no source for the kind). */
+/** The highest number of `kind` already on disk (0 if none, or no source for the kind). Throws on a malformed entry or a missing `file`. */
 export function highestOnDisk(root: string | null, kind: string): number {
   if (!root) return 0;
   const src = loadConfig(root).numbers?.[kind] ?? DEFAULT_NUMBERS[kind];
@@ -98,8 +98,15 @@ export function highestOnDisk(root: string | null, kind: string): number {
   if (new RegExp(`${src.pattern}|`).exec("")!.length < 2) throw new Error(`${where}: "pattern" needs a capture group`);
   let texts: string[];
   if ("file" in src) {
+    // A missing file would read as "no numbers taken" and hand out one already in use,
+    // so it's refused. (A glob that matches nothing is fine: an empty folder is real.)
     const f = join(root, src.file);
-    texts = existsSync(f) ? [readFileSync(f, "utf8")] : [];
+    if (!existsSync(f)) throw new Error(`${where}: file "${src.file}" doesn't exist`);
+    try {
+      texts = [readFileSync(f, "utf8")];
+    } catch (e) {
+      throw new Error(`${where}: can't read "${src.file}": ${(e as Error).message}`);
+    }
   } else {
     texts = [...new Bun.Glob(src.glob).scanSync({ cwd: root })].map((p) => p.split("/").pop()!);
   }
