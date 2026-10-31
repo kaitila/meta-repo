@@ -7,7 +7,11 @@ import { mainCheckout, nameHash, normalise, slot } from "../src/slot";
 
 const dir = mkdtempSync(join(tmpdir(), "test-kit-slot-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-const git = (args: string[], cwd: string) => Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+function git(args: string[], cwd: string) {
+  const r = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr.toString()}`);
+  return r;
+}
 
 function repoWithWorktrees() {
   const id = Math.random().toString(36).slice(2, 8);

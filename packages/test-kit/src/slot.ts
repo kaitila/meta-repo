@@ -1,7 +1,7 @@
 // Worktree "slots": every git worktree gets its own databases, ports and cookie
 // names, so parallel agents never share state. Main checkout = slot "" (no suffix).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -69,8 +69,11 @@ export function slot(opts: SlotOptions = {}): Slot {
   const fromEnv = process.env[opts.envVar ?? "SLOT"];
   const name = fromEnv !== undefined ? normalise(fromEnv, maxLen) : isWorktree(root) ? normalise(basename(root), maxLen) : "";
   const suffix = (base: string) => (name ? `${base}_${name}` : base);
-  const top = real(git(["rev-parse", "--show-toplevel"], root) ?? root);
-  const registry = registryFile(root);
+  // Both need git, so they are worked out on first use, not on every slot() call.
+  let top: string | undefined;
+  let registry: string | undefined;
+  const toplevel = () => (top ??= real(git(["rev-parse", "--show-toplevel"], root) ?? root));
+  const registryAt = () => (registry ??= registryFile(root));
   return {
     name,
     root,
@@ -84,9 +87,13 @@ export function slot(opts: SlotOptions = {}): Slot {
       return u.toString();
     },
     cookieName: (base) => suffix(base).replace(/[^A-Za-z0-9_]/g, ""),
-    registryPath: registry,
+    get registryPath() {
+      return registryAt();
+    },
     async ports(bases, range = 9) {
       if (!name) return bases;
+      const registry = registryAt();
+      const top = toplevel();
       return withLock(registry, async () => {
         const reg = readRegistry(registry);
         dropStale(reg, root, name);
@@ -103,7 +110,11 @@ export function slot(opts: SlotOptions = {}): Slot {
             if (i !== mine?.offset && !taken.has(i) && (await free(i))) offset = i;
           }
         }
-        if (offset === undefined) throw new Error(`no free ports for slot ${name} near ${bases.join(", ")}`);
+        if (offset === undefined)
+          throw new Error(
+            `no free ports for slot ${name} near ${bases.join(", ")}: every offset 1..${range} is busy or reserved by another slot in ${registry}. ` +
+              "Call releasePorts() for slots you no longer use, or remove their entries from that file.",
+          );
         if (mine?.offset !== offset || mine.root !== top) {
           reg.slots[name] = { offset, root: top };
           writeRegistry(registry, reg);
@@ -113,6 +124,7 @@ export function slot(opts: SlotOptions = {}): Slot {
     },
     async releasePorts() {
       if (!name) return;
+      const registry = registryAt();
       await withLock(registry, async () => {
         const reg = readRegistry(registry);
         if (!(name in reg.slots)) return;
@@ -146,7 +158,8 @@ function real(p: string): string {
 /** The registry lives in the git dir every worktree of the repository shares. */
 function registryFile(root: string): string {
   const common = git(["rev-parse", "--git-common-dir"], root);
-  const base = common ? resolve(root, common) : join(tmpdir(), "test-kit-no-git");
+  // Outside git: a per-user temp dir, so another user's dir can't block us with EACCES.
+  const base = common ? resolve(root, common) : join(tmpdir(), `test-kit-no-git-${process.getuid?.() ?? "user"}`);
   return join(base, "test-kit", "ports.json");
 }
 
@@ -186,15 +199,18 @@ async function withLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
   mkdirSync(dirname(file), { recursive: true });
   const deadline = Date.now() + LOCK_WAIT_MS;
+  const token = `${process.pid}.${Math.random().toString(36).slice(2)}`;
+  const owner = join(lock, "owner");
   for (;;) {
     try {
       mkdirSync(lock);
+      writeFileSync(owner, token);
       break;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       try {
         // A holder that died leaves the dir behind; take it over once it is old enough.
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmdirSync(lock);
+        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { recursive: true, force: true });
       } catch {
         // released (or taken over) meanwhile: just retry
       }
@@ -205,8 +221,10 @@ async function withLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } finally {
+    // Release only our own lock: if we ran past LOCK_STALE_MS and were taken over, the
+    // lock now belongs to someone else.
     try {
-      rmdirSync(lock);
+      if (readFileSync(owner, "utf8") === token) rmSync(lock, { recursive: true, force: true });
     } catch {
       // already gone
     }

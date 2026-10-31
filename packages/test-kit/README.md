@@ -19,6 +19,8 @@ The main checkout gets `bases` unchanged. A worktree gets `base + i` for one off
 - A slot without one takes the first offset, starting from a hash of its name, whose ports are free and that no other slot has recorded. Two names whose hashes collide therefore still get different blocks. If no offset is left, `ports()` throws.
 - Allocating drops entries for worktrees that no longer exist (not in `git worktree list`). `releasePorts()` drops this slot's entry straight away, e.g. before `git worktree remove`.
 - Reads and writes hold a lock (a `ports.json.lock` directory, taken over after 30 s if its holder died) and replace the file atomically, so parallel processes never get the same block.
+- A slot has one entry, whatever the bases. Ask for all of a slot's ports in one `ports()` call; separate calls with different bases can move the slot's offset.
+- Entries for slots named by `SLOT` live as long as the checkout they ran in. If you set a new `SLOT` per run, call `releasePorts()` when the run ends, or after nine names `ports()` throws.
 
 ## Caution
 - Replica-mode reset skips **all** triggers while deleting. If your schema relies on triggers to clean up, use a non-superuser test role (the TRUNCATE path).
