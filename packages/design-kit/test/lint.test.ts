@@ -21,6 +21,65 @@ describe("lintText", () => {
     ]);
   });
 
+  test("named colours fail in CSS values, any case", () => {
+    expect(rules("a.css", ".a {\n  color: red;\n  background: rebeccapurple;\n  border: 1px solid WHITE;\n}")).toEqual([
+      "2 raw-color red",
+      "3 raw-color rebeccapurple",
+      "4 raw-color WHITE",
+      "4 raw-px 1px",
+    ]);
+    expect(rules("a.css", ".a { color: DarkSlateGray; fill: grey; stroke: gray; background: linear-gradient(red, var(--color-ink, blue)) }")).toEqual([
+      "1 raw-color DarkSlateGray",
+      "1 raw-color grey",
+      "1 raw-color gray",
+      "1 raw-color red",
+      "1 raw-color blue",
+    ]);
+  });
+
+  test("allowed keywords and non-colour uses of colour words are clean", () => {
+    const css = [
+      ".red, .bordered > #white { transition: color 1s; color: inherit; background: transparent; border-color: currentColor; outline-color: CURRENTCOLOR }",
+      ".b { color: var(--color-red); margin: calc(1rem * tan(1deg)); width: initial; height: unset; top: revert }",
+      '.c { content: "red"; background: url(red.png); font-family: Tan, serif; animation-name: red; grid-area: white; --color-red: var(--color-ink) }',
+      "@keyframes red { from { opacity: 0 } }",
+      ".d { --token-name: reduce; quotes: tan }",
+    ].join("\n");
+    expect(rules("a.css", css)).toEqual([]);
+  });
+
+  test("a custom property holding a named colour fails", () => {
+    expect(rules("a.css", ":root { --brand: tomato }")).toEqual(["1 raw-color tomato"]);
+  });
+
+  test("design-lint-allow skips a named colour", () => {
+    expect(rules("a.css", ".a { color: red } /* design-lint-allow: brand match */\n.b { color: blue }")).toEqual(["2 raw-color blue"]);
+  });
+
+  test("in code, named colours count only in strings that are style values", () => {
+    const ts = [
+      "const red = 1; const white = red + 2; reduce(red);",
+      'const kind = "red"; type T = "red" | "white"; log("Note: red");',
+      "// color: red in a comment",
+      'const a = { color: "red", backgroundColor: \'White\' };',
+      'const b = "color: red; margin: 0";',
+      "const c = `border: 1px solid ${x} blue`;",
+      'const d = <div style="background: tomato" fill="navy" font-family="Tan" />;',
+      'const e = "font-family: Tan; color: var(--color-ink)";',
+    ].join("\n");
+    expect(rules("a.tsx", ts)).toEqual([
+      "4 raw-color red",
+      "4 raw-color White",
+      "5 raw-color red",
+      "6 raw-px 1px",
+      "6 raw-color blue",
+      "7 raw-color tomato",
+      "7 raw-color navy",
+    ]);
+    expect(rules("a.html", '<p style="color: red">x</p> <!-- design-lint-allow -->')).toEqual([]);
+    expect(rules("a.html", '<p style="color: red">x</p>')).toEqual(["1 raw-color red"]);
+  });
+
   test("px fails anywhere but 0, including in @media; rem, em and % are fine", () => {
     expect(rules("a.css", ".a { margin: 12px 0px 0 1.5px; padding: 1rem }\n@media (min-width: 600px) { .b { top: 1em } }")).toEqual([
       "1 raw-px 12px",
