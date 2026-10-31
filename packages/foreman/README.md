@@ -2,13 +2,13 @@
 
 A local task layer for AI coding agents working in parallel git worktrees. Tasks have acceptance checks. A worker claims a task, someone else verifies it, and sign-off depends on risk. There is no server, account or hosted service.
 
-Status: MVP (step M3), plus the launch adapter, the first piece of M6. The dispatcher, the janitor and the web board come later in M6. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
+Status: MVP (step M3), plus the launch adapter and the dispatcher from M6. The janitor and the web board come later in M6. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
 
 ## How it works
 
 - **One database per repository**, at `<main checkout>/.foreman/foreman.db` (SQLite, WAL mode). It is found from any worktree through git's shared directory, so every agent sees the same tasks. Add `.foreman/` to `.gitignore`.
 - **Every change** is one transaction plus an event in an append-only log.
-- **Claims are atomic and expire.** A worker keeps a claim alive with `heartbeat` or `progress`, and an expired claim goes back to `ready`.
+- **Claims are atomic and expire.** A worker keeps a claim alive with `heartbeat` or `progress`, and an expired claim goes back to `ready`. A claim the dispatcher pinned to a process follows the process instead: kept while it runs, released once it's gone.
 - **Verification:** the worker submits a PR and lets go. Someone who didn't work on the task verifies it, recording one result per acceptance check.
 - **Sign-off** ([D0008](../../docs/decisions/D0008-risk-from-paths.md)):
   - `auto` tasks are approved once every check passes.
@@ -99,5 +99,20 @@ const r = await launch({
 ```
 
 `buildLaunch()` returns the command and environment without starting anything.
+
+## Dispatcher
+
+`fm dispatch [--max 3] [--once] [--model m] [--budget usd]` (`src/dispatch.ts`) runs workers and verifiers through the launch adapter until nothing more can start.
+
+- **Slots:** at most `--max` sessions at once, workers and verifiers together. Submitted tasks get a verifier before new tasks get a worker.
+- **No clashes:** a ready task waits while its declared paths overlap those of a task that is `claimed`, `in_progress`, `in_review` or `verifying`. A task that declares no paths overlaps every task.
+- **A worker per task:** the dispatcher claims the task as `worker-<task>` and makes `.claude/worktrees/<task>` on a new branch `<task>-<title>` from `origin/main`. It records both with `progress`, then starts a worker with the `ship` skill. A task back for rework keeps its worktree, or its branch if the worktree is gone. If the worktree can't be made, the task goes back to `ready`.
+- **A verifier when it's submitted:** once the worker has exited and the task is `in_review`, the dispatcher takes it with `start_verify` as `verifier-<task>` and starts a verifier with the `verify` skill in the same worktree. It also verifies other `in_review` tasks whose recorded worktree exists.
+- **Leases follow the process:** each session's lease is pinned to its PID (`pinLease`). While the PID lives, the lease doesn't time out; once it's gone, `reclaim` releases the task (`ready`, or `in_review` for a verifier). A new holder ends the pin. The pins live in their own table, so an older foreman on the same database still works.
+- **Prompts:** both prompts say not to spawn helper subagents, to give commands `< /dev/null`, and how to reach foreman through the CLI if its MCP tools are missing. The worker's also says the task is already claimed and to install dependencies in the fresh worktree first. Sessions run with `FOREMAN_AGENT=1`, and their stdin is `/dev/null`.
+- **One try per run:** each task gets at most one worker and one verifier per `fm dispatch`. A task that failed, or whose worker died, waits for the next run.
+- **`--once`:** start what fits now, see those tasks through verification, then stop. **`--model`** and **`--budget`** (USD, per session) go to every session.
+
+Tests use a fake launcher (`Dispatcher`'s `launcher` option). `FOREMAN_LIVE_DISPATCH=1 bun test packages/foreman/test/dispatch.test.ts` also runs one real worker on a throwaway repo (Haiku, under $1).
 
 **Live test:** `bun run live-launch` runs real Claude Code against a fake home with markers in `~/.claude/CLAUDE.md`, `~/CLAUDE.md`, rules above the repo and a user hook. A plain session must see them. A verifier started by `launch()` must see only the repo's own CLAUDE.md, the user hook must not run, the project's own PreToolUse hook must run, and the login must still be a symlink afterwards. It is opt-in and not run in CI; it costs about a cent with Haiku.

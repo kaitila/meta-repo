@@ -122,19 +122,29 @@ export function isProtected(file: string, protectedPaths: string[]): boolean {
 /** The literal part of a glob before its first wildcard: "src/**" → "src/". */
 const prefix = (g: string) => g.split(/[*?[{]/)[0]!;
 
+/** Could some file match both globs? Errs towards yes. */
+export function globsOverlap(p: string, q: string): boolean {
+  const pp = prefix(p);
+  const qp = prefix(q);
+  if (new Bun.Glob(q).match(p) || new Bun.Glob(q).match(pp) || new Bun.Glob(p).match(qp)) return true;
+  // Literal prefixes overlap ("packages/" vs "packages/foreman/src/"); an empty prefix
+  // ("**/.claude/**") says nothing, the glob matches above handle it.
+  return pp !== "" && qp !== "" && (pp.startsWith(qp) || qp.startsWith(pp));
+}
+
 /** Could a task with these declared paths touch a protected path? Errs towards yes. */
 export function mayTouchProtected(paths: string[], protectedPaths: string[]): boolean {
   if (paths.length === 0) return false; // undeclared: the diff check at verdict time decides
-  return paths.some((p) =>
-    protectedPaths.some((q) => {
-      const pp = prefix(p);
-      const qp = prefix(q);
-      if (new Bun.Glob(q).match(p) || new Bun.Glob(q).match(pp) || new Bun.Glob(p).match(qp)) return true;
-      // Literal prefixes overlap ("packages/" vs "packages/foreman/src/"); an empty prefix
-      // ("**/.claude/**") says nothing, the glob matches above handle it.
-      return pp !== "" && qp !== "" && (pp.startsWith(qp) || qp.startsWith(pp));
-    }),
-  );
+  return paths.some((p) => protectedPaths.some((q) => globsOverlap(p, q)));
+}
+
+/**
+ * Could two tasks edit the same file? A task that declares no paths could touch
+ * anything, so it overlaps every task (the dispatcher keeps it apart from the rest).
+ */
+export function pathsOverlap(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return true;
+  return a.some((p) => b.some((q) => globsOverlap(p, q)));
 }
 
 type Run = (cmd: string[], cwd: string) => string | null;
