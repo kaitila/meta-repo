@@ -52,6 +52,12 @@ Signing off
   approve [id...] [--note text] people only; no id = everything waiting, after one yes
   merged <id> [--pr url]
 
+Running agents
+  dispatch [--max 3] [--once] [--model m] [--budget usd]
+                                claim ready tasks into worktrees, run a worker for each and a fresh
+                                verifier once it is submitted; at most --max sessions at once, never two
+                                tasks with overlapping paths; --once: see only what fits now through
+                                verification, then stop; --budget: each session's limit in USD
 Running the loop
   merge-queue [--once] [--dry-run] [--settle-seconds 30] [--interval 60]
                                 merge approved PRs one at a time: settled green checks at the
@@ -60,7 +66,7 @@ Running the loop
                                 reclaim expired leases, remove finished tasks' worktrees, list stuck tasks
 
 Housekeeping
-  reclaim                       release claims whose lease ran out
+  reclaim                       release claims whose lease ran out, or whose pinned process is gone
   reserve <kind> [--task id]    next free number (also reads what is on disk: foreman.json "numbers")
   export <id> [--out dir]       write the task as markdown (default docs/tasks/<id>.md)
   mcp                           run the MCP server on stdio
@@ -118,7 +124,10 @@ export async function main(argv: string[]): Promise<number | null> {
       title: { type: "string" },
       "remove-check": { type: "string", multiple: true },
       "add-path": { type: "string", multiple: true },
+      max: { type: "string" },
       once: { type: "boolean" },
+      model: { type: "string" },
+      budget: { type: "string" },
       "dry-run": { type: "boolean" },
       "settle-seconds": { type: "string" },
       interval: { type: "string" },
@@ -243,6 +252,28 @@ export async function main(argv: string[]): Promise<number | null> {
     }
     case "merged":
       return one(f.merged(need(0, "task id"), me, o.pr)), 0;
+    case "dispatch": {
+      const num = (v: string | undefined, what: string) => {
+        if (v === undefined) return undefined;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) throw new ForemanError("invalid", `--${what} must be a positive number, got "${v}"`);
+        return n;
+      };
+      const { dispatch } = await import("./dispatch");
+      const sessions = await dispatch(f, {
+        max: num(o.max, "max"),
+        once: o.once,
+        model: o.model,
+        budgetUsd: num(o.budget, "budget"),
+        actor: me,
+        log: o.json ? () => {} : undefined,
+      });
+      const cost = sessions.reduce((a, s) => a + s.costUsd, 0);
+      const text = sessions.length
+        ? `${sessions.map((s) => `${s.task} ${s.role}: ${s.status}${s.error ? ` (${s.error})` : ""}`).join("\n")}\n${sessions.length} sessions, $${cost.toFixed(2)}`
+        : "nothing to dispatch";
+      return out(sessions, text), 0;
+    }
     case "merge-queue": {
       const actor = process.env.FOREMAN_ACTOR ? me : { name: "merge-queue", kind: me.kind };
       const show = (r: QueueEntry[]) =>

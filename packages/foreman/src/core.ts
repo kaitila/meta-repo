@@ -77,6 +77,16 @@ export class ForemanError extends Error {
 
 export const DEFAULT_LEASE_MINUTES = 30;
 
+/** Is this process still running? EPERM means it is, just not ours to signal. */
+export function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
 /** The rework reason given to an approved PR that conflicts with main. */
 export const CONFLICT_REASON = "conflicts with main: merge main and verify again";
 
@@ -168,6 +178,8 @@ export class Foreman {
     public root: string | null = null, // repo root, for reserving numbers from files
     private now: () => number = Date.now,
     public policy: Policy = gitPolicy(root),
+    /** Checks a pinned lease's process (D0011). Tests replace it. */
+    public isAlive: (pid: number) => boolean = pidAlive,
   ) {}
 
   static open(cwd = process.cwd()): Foreman {
@@ -235,6 +247,8 @@ export class Foreman {
   }
 
   private set(id: string, fields: Record<string, string | number | null>) {
+    // A new holder, or none, ends any lease pinned to the old holder's process.
+    if ("assignee" in fields) this.db.query(`DELETE FROM lease_pids WHERE task_id = ?`).run(id);
     const keys = Object.keys(fields);
     this.db
       .query(`UPDATE tasks SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
@@ -347,6 +361,49 @@ export class Foreman {
       this.expect(t, ["claimed", "in_progress", "verifying"], "heartbeat");
       this.holder(t, actor, "heartbeat");
       this.set(id, { lease_until: this.now() + leaseMinutes * 60_000 });
+      return this.get(id);
+    });
+  }
+
+  /**
+   * Pin the holder's lease to its process (D0011): while that PID lives, the lease
+   * doesn't time out; once it's gone, the claim is released at the next reclaim.
+   * The dispatcher calls this right after it starts a worker or verifier.
+   */
+  pinLease(id: string, actor: Actor, pid: number): Task {
+    if (!Number.isInteger(pid) || pid <= 0) throw new ForemanError("invalid", `bad pid ${pid}`);
+    return this.tx(() => {
+      const t = this.get(id);
+      this.expect(t, ["claimed", "in_progress", "verifying"], "pin the lease of");
+      this.holder(t, actor, "pin the lease of");
+      this.db
+        .query(`INSERT OR REPLACE INTO lease_pids (task_id, assignee, pid) VALUES (?, ?, ?)`)
+        .run(id, actor.name, pid);
+      this.event(id, actor, "lease_pinned", { pid });
+      return this.get(id);
+    });
+  }
+
+  /** The process a task's lease is pinned to, if its holder is still the one who pinned it. */
+  leasePid(id: string): number | null {
+    const r = this.db
+      .query(`SELECT p.pid FROM lease_pids p JOIN tasks t ON t.id = p.task_id WHERE p.task_id = ? AND t.assignee = p.assignee`)
+      .get(id) as { pid: number } | null;
+    return r?.pid ?? null;
+  }
+
+  /**
+   * The holder lets go without finishing: a claimed task goes back to ready, a task
+   * being verified back to in_review. The dispatcher uses it when it can't start a session.
+   */
+  release(id: string, actor: Actor, reason: string): Task {
+    return this.tx(() => {
+      const t = this.get(id);
+      this.expect(t, ["claimed", "in_progress", "verifying"], "release");
+      this.holder(t, actor, "release");
+      const back: Status = t.status === "verifying" ? "in_review" : "ready";
+      this.set(id, { status: back, assignee: null, lease_until: null });
+      this.event(id, actor, "released", { reason, status: t.status });
       return this.get(id);
     });
   }
@@ -654,20 +711,31 @@ export class Foreman {
     });
   }
 
-  /** Release claims whose lease ran out: the worker or verifier is gone. Returns the ids. */
+  /**
+   * Release claims whose holder is gone. Returns the ids. A lease pinned to a process
+   * (pinLease) follows the process, not the clock: kept while it lives, released once
+   * it is gone. Any other lease is released when its time runs out.
+   */
   releaseExpired(actor: Actor): string[] {
-    const stale = this.db
+    const rows = this.db
       .query(
-        `SELECT * FROM tasks WHERE lease_until IS NOT NULL AND lease_until < ?
-           AND status IN ('claimed','in_progress','verifying')`,
+        `SELECT t.*, p.pid AS pinned_pid FROM tasks t
+           LEFT JOIN lease_pids p ON p.task_id = t.id AND p.assignee = t.assignee
+         WHERE t.status IN ('claimed','in_progress','verifying')
+           AND ((t.lease_until IS NOT NULL AND t.lease_until < ?) OR p.pid IS NOT NULL)`,
       )
       .all(this.now()) as Row[];
-    for (const r of stale.map(toTask)) {
+    const released: string[] = [];
+    for (const row of rows) {
+      const r = toTask(row);
+      const pid = (row.pinned_pid as number | null) ?? null;
+      if (pid !== null && this.isAlive(pid)) continue;
       const back: Status = r.status === "verifying" ? "in_review" : "ready";
       this.set(r.id, { status: back, assignee: null, lease_until: null });
-      this.event(r.id, actor, "lease_expired", { was: r.assignee, status: r.status });
+      this.event(r.id, actor, "lease_expired", { was: r.assignee, status: r.status, ...(pid !== null ? { pid, reason: "process gone" } : {}) });
+      released.push(r.id);
     }
-    return stale.map((r) => r.id as string);
+    return released;
   }
 
   reclaim(actor: Actor): string[] {
