@@ -17,6 +17,7 @@
   - `approve` is for people only. It is refused for agents (`CLAUDECODE=1`/`FOREMAN_AGENT=1`), outside an interactive terminal, and is absent from MCP.
   - Tasks with risk `human` can't be claimed by agents.
 - **Leases end on timeout:** an expired claim returns to ready (or, during verification, to in_review) and someone else can take it. A worker that comes back late is refused as "not the holder", so two workers can't both submit.
+  - **Amended:** [D0011](D0011-foreman-dispatch.md) changed this rule. The dispatcher pins the lease to the worker's PID, so a timeout alone never hands the task to someone else; only a dead process does. This is the pinning that "Revisit if" below expected at M6.
 - **Numbers that parallel PRs clash on** (decisions, migrations) come from `foreman reserve`. For decisions it also reads `docs/decisions/` on disk.
 - **Identity** comes from the environment (`FOREMAN_ACTOR`). This is a guardrail, not a security boundary (D0003). The hard limits are branch protection and the verifier.
 
