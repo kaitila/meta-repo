@@ -14,6 +14,7 @@
     "demo:generate": "bun presets/generate.ts bun-ts-postgres examples/demo-app --force",
     "live-test": "bun packages/agent-kit/scripts/live-test.ts",
     "live-launch": "bun packages/foreman/scripts/live-launch.ts",
+    "live-intake": "bun packages/foreman/scripts/live-intake.ts",
     "link": "cd packages/foreman && bun link",
     "docs:check": "bun packages/docs-check/src/cli.ts"
   },
