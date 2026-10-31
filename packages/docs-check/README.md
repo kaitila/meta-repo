@@ -17,7 +17,7 @@ Exit codes: 0 clean (warnings allowed), 1 failures, 2 couldn't run.
 | index | `docs/decisions/README.md` isn't the generated index (`--write-index` writes it) |
 | refs | a `Dnnnn` (padded, so "D3 chart" is ignored) names no decision |
 | reviewed | a `Last reviewed: YYYY-MM-DD (through Dnnnn)` line is malformed, future-dated or names an unknown decision. Older than 90 days is a warning, or a failure with `--strict-freshness`. |
-| registries | opt-in code↔doc lists, e.g. `envRegistry`: every env var the code reads is in the doc's table, the doc lists nothing the code doesn't read, and `.env.example` holds only real keys |
+| registries | opt-in code↔doc lists, e.g. `envRegistry`: every env var the code reads (outside tests and `.claude/`, which is agent tooling) is in the doc's table, the doc lists nothing the code doesn't read, and `.env.example` holds only real keys |
 
 A line ending in `<!-- docs-check: planned -->` (or `removed`, `elsewhere`) skips its link and path checks: for a file that's coming, gone, or in another repo.
 
