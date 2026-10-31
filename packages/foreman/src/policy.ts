@@ -31,8 +31,8 @@ export interface Policy {
   protectedPaths: string[];
   /** Files the task's PR (or, without a GitHub PR, its branch) changes; null if unknown. */
   changedFiles(task: { branch: string | null; pr: string | null }): string[] | null;
-  /** A GitHub PR's head branch and commit; null if it can't be looked up. */
-  prInfo?(pr: string): { head: string; headSha: string } | null;
+  /** A GitHub PR's head branch and commit, and GitHub's MERGEABLE/CONFLICTING/UNKNOWN; null if it can't be looked up. */
+  prInfo?(pr: string): { head: string; headSha: string; mergeable?: string } | null;
   /** This repository on GitHub, as "owner/name" (from the origin remote); null if unknown. */
   originRepo?(): string | null;
 }
@@ -122,24 +122,35 @@ export function isProtected(file: string, protectedPaths: string[]): boolean {
 /** The literal part of a glob before its first wildcard: "src/**" → "src/". */
 const prefix = (g: string) => g.split(/[*?[{]/)[0]!;
 
+/** Could some file match both globs? Errs towards yes. */
+export function globsOverlap(p: string, q: string): boolean {
+  const pp = prefix(p);
+  const qp = prefix(q);
+  if (new Bun.Glob(q).match(p) || new Bun.Glob(q).match(pp) || new Bun.Glob(p).match(qp)) return true;
+  // Literal prefixes overlap ("packages/" vs "packages/foreman/src/"); an empty prefix
+  // ("**/.claude/**") says nothing, the glob matches above handle it.
+  return pp !== "" && qp !== "" && (pp.startsWith(qp) || qp.startsWith(pp));
+}
+
 /** Could a task with these declared paths touch a protected path? Errs towards yes. */
 export function mayTouchProtected(paths: string[], protectedPaths: string[]): boolean {
   if (paths.length === 0) return false; // undeclared: the diff check at verdict time decides
-  return paths.some((p) =>
-    protectedPaths.some((q) => {
-      const pp = prefix(p);
-      const qp = prefix(q);
-      if (new Bun.Glob(q).match(p) || new Bun.Glob(q).match(pp) || new Bun.Glob(p).match(qp)) return true;
-      // Literal prefixes overlap ("packages/" vs "packages/foreman/src/"); an empty prefix
-      // ("**/.claude/**") says nothing, the glob matches above handle it.
-      return pp !== "" && qp !== "" && (pp.startsWith(qp) || qp.startsWith(pp));
-    }),
-  );
+  return paths.some((p) => protectedPaths.some((q) => globsOverlap(p, q)));
 }
 
-type Run = (cmd: string[], cwd: string) => string | null;
+/**
+ * Could two tasks edit the same file? A task that declares no paths could touch
+ * anything, so it overlaps every task (the dispatcher keeps it apart from the rest).
+ */
+export function pathsOverlap(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return true;
+  return a.some((p) => b.some((q) => globsOverlap(p, q)));
+}
 
-const defaultRun: Run = (cmd, cwd) => {
+/** Runs a command: its trimmed stdout, or null if it failed. gh and git go through one, so tests need no network. */
+export type Run = (cmd: string[], cwd: string) => string | null;
+
+export const defaultRun: Run = (cmd, cwd) => {
   try {
     const p = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe", timeout: 30_000 });
     return p.exitCode === 0 ? p.stdout.toString().trim() : null;
@@ -156,11 +167,11 @@ export function gitPolicy(root: string | null, run: Run = defaultRun): Policy {
     protectedPaths: loadProtected(root),
     prInfo(pr) {
       if (!root || !GITHUB_PR.test(pr)) return null;
-      const out = run(["gh", "pr", "view", pr, "--json", "headRefName,headRefOid"], root);
+      const out = run(["gh", "pr", "view", pr, "--json", "headRefName,headRefOid,mergeable"], root);
       if (out === null) return null;
       try {
-        const j = JSON.parse(out) as { headRefName?: string; headRefOid?: string };
-        return j.headRefName && j.headRefOid ? { head: j.headRefName, headSha: j.headRefOid } : null;
+        const j = JSON.parse(out) as { headRefName?: string; headRefOid?: string; mergeable?: string };
+        return j.headRefName && j.headRefOid ? { head: j.headRefName, headSha: j.headRefOid, mergeable: j.mergeable } : null;
       } catch {
         return null;
       }

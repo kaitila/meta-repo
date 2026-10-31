@@ -48,7 +48,7 @@ function migrate(db: Database) {
       `foreman database is schema v${current}, this foreman knows v${SCHEMA_VERSION}: upgrade foreman`,
     );
   }
-  if (current === SCHEMA_VERSION) return;
+  if (current === SCHEMA_VERSION) return additive(db);
   db.transaction(() => {
     db.exec(`
       CREATE TABLE tasks (
@@ -102,4 +102,20 @@ function migrate(db: Database) {
       String(SCHEMA_VERSION),
     );
   })();
+  additive(db);
+}
+
+/**
+ * Tables an older foreman can ignore, so they don't bump the schema version: every
+ * worktree shares one database, and a newer foreman in one of them must not lock
+ * out the older ones still running elsewhere.
+ */
+function additive(db: Database) {
+  // A lease pinned to a process (D0011): while the PID lives, the claim doesn't time out;
+  // once it's gone, the claim is released. Only valid while the task's assignee is still `assignee`.
+  db.exec(`CREATE TABLE IF NOT EXISTS lease_pids (
+    task_id  TEXT PRIMARY KEY REFERENCES tasks(id),
+    assignee TEXT NOT NULL,
+    pid      INTEGER NOT NULL
+  )`);
 }

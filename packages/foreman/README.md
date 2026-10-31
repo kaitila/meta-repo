@@ -2,13 +2,13 @@
 
 A local task layer for AI coding agents working in parallel git worktrees. Tasks have acceptance checks. A worker claims a task, someone else verifies it, and sign-off depends on risk. There is no server, account or hosted service.
 
-Status: MVP (step M3), plus two pieces of M6: the launch adapter and intake. The dispatcher, the janitor and the web board come later in M6. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
+Status: MVP (step M3), plus the launch adapter, the dispatcher, intake, the merge queue and the janitor from M6 ([D0011](../../docs/decisions/D0011-foreman-dispatch.md)). The web board is still to come. The rules are in [D0006](../../docs/decisions/D0006-foreman-mvp-rules.md).
 
 ## How it works
 
 - **One database per repository**, at `<main checkout>/.foreman/foreman.db` (SQLite, WAL mode). It is found from any worktree through git's shared directory, so every agent sees the same tasks. Add `.foreman/` to `.gitignore`.
 - **Every change** is one transaction plus an event in an append-only log.
-- **Claims are atomic and expire.** A worker keeps a claim alive with `heartbeat` or `progress`, and an expired claim goes back to `ready`.
+- **Claims are atomic and expire.** A worker keeps a claim alive with `heartbeat` or `progress`, and an expired claim goes back to `ready`. A claim the dispatcher pinned to a process follows the process instead: kept while it runs, released once it's gone.
 - **Verification:** the worker submits a PR and lets go. Someone who didn't work on the task verifies it, recording one result per acceptance check.
 - **Sign-off** ([D0008](../../docs/decisions/D0008-risk-from-paths.md)):
   - `auto` tasks are approved once every check passes.
@@ -53,10 +53,33 @@ foreman edit T-0001 --add-path "docs/**"   # while working: the holder may only 
 foreman rework T-0001 --reason "gap found after the verdict"   # back to ready; verify again
 foreman reserve decision           # next free Dnnnn, so parallel PRs never clash
 foreman export T-0001              # docs/tasks/T-0001.md
+foreman merge-queue --once         # merge one approved PR whose checks are green (--dry-run to look)
+foreman merge-queue                # the same, every 60 s until stopped (--interval, --settle-seconds 30)
+foreman janitor --dry-run          # reclaim, clean up finished tasks, list stuck ones (--stuck-hours 24)
 foreman intake "Add a stage filter to /investors"   # a session files it as draft tasks (see Intake)
 ```
 
 Every command takes `--json`.
+
+## Merge queue and janitor
+
+Both run as agents. Without `FOREMAN_ACTOR` they act as `merge-queue` and `janitor`.
+
+- **Merge queue** (`merge-queue`, [D0011](../../docs/decisions/D0011-foreman-dispatch.md), [D0012](../../docs/decisions/D0012-merge-queue-conflict-send-back.md)): approved tasks, oldest first. It merges a PR only when:
+  - it is a GitHub PR still at the commit that was verified;
+  - its checks are green: at least one, all complete, all SUCCESS, NEUTRAL or SKIPPED (optional ones count too);
+  - the checks have settled: the same check names on two reads at least `--settle-seconds` apart;
+  - GitHub says it is `MERGEABLE`.
+- **The merge** is `gh pr merge --merge --delete-branch --match-head-commit <verified sha>`, so GitHub refuses if the head moved. Then the task is marked merged.
+- **One merge per pass.** Main has moved, so the other PRs are read again on the next pass.
+- **A PR that conflicts with main** (`CONFLICTING`) goes back to `ready`, to merge main and be verified again. Foreman asks GitHub itself first, so anyone may trigger this, but only a real conflict counts.
+- **Anything else** is skipped with the reason and tried again next pass. Without `--once` it loops.
+- **Janitor** (`janitor`):
+  - reclaims expired claims;
+  - for done and cancelled tasks, removes the recorded worktree if it is a clean git worktree inside this repo. One with uncommitted changes is kept and reported;
+  - releases that worktree's test-kit ports, if `@meta-repo/test-kit` is installed;
+  - deletes the task's local branch only if it is already in `main` or `origin/main`;
+  - lists tasks in `claimed`, `in_progress`, `in_review` or `verifying` for longer than `--stuck-hours` since they entered that state.
 
 ## Agents
 
@@ -103,6 +126,21 @@ const r = await launch({
 `buildLaunch()` returns the command and environment without starting anything.
 
 **Live test:** `bun run live-launch` runs real Claude Code against a fake home with markers in `~/.claude/CLAUDE.md`, `~/CLAUDE.md`, rules above the repo and a user hook. A plain session must see them. A verifier started by `launch()` must see only the repo's own CLAUDE.md, the user hook must not run, the project's own PreToolUse hook must run, and the login must still be a symlink afterwards. It is opt-in and not run in CI; it costs about a cent with Haiku.
+
+## Dispatcher
+
+`fm dispatch [--max 3] [--once] [--model m] [--budget usd]` (`src/dispatch.ts`) runs workers and verifiers through the launch adapter until nothing more can start.
+
+- **Slots:** at most `--max` sessions at once, workers and verifiers together. Submitted tasks get a verifier before new tasks get a worker.
+- **No clashes:** a ready task waits while its declared paths overlap those of a task that is `claimed`, `in_progress`, `in_review` or `verifying`. A task that declares no paths overlaps every task.
+- **A worker per task:** the dispatcher claims the task as `worker-<task>` and makes `.claude/worktrees/<task>` on a new branch `<task>-<title>` from `origin/main`. It records both with `progress`, then starts a worker with the `ship` skill. A task back for rework keeps its worktree, or its branch if the worktree is gone. If the worktree can't be made, the task goes back to `ready`.
+- **A verifier when it's submitted:** once the worker has exited and the task is `in_review`, the dispatcher takes it with `start_verify` as `verifier-<task>` and starts a verifier with the `verify` skill in the same worktree. It also verifies other `in_review` tasks whose recorded worktree exists.
+- **Leases follow the process:** each session's lease is pinned to its PID (`pinLease`). While the PID lives, the lease doesn't time out; once it's gone, `reclaim` releases the task (`ready`, or `in_review` for a verifier). A new holder ends the pin. The pins live in their own table, so an older foreman on the same database still works.
+- **Prompts:** both prompts say not to spawn helper subagents, to give commands `< /dev/null`, and how to reach foreman through the CLI if its MCP tools are missing. The worker's also says the task is already claimed and to install dependencies in the fresh worktree first. Sessions run with `FOREMAN_AGENT=1`, and their stdin is `/dev/null`.
+- **One try per run:** each task gets at most one worker and one verifier per `fm dispatch`. A task that failed, or whose worker died, waits for the next run.
+- **`--once`:** start what fits now, see those tasks through verification, then stop. **`--model`** and **`--budget`** (USD, per session) go to every session.
+
+Tests use a fake launcher (`Dispatcher`'s `launcher` option). `FOREMAN_LIVE_DISPATCH=1 bun test packages/foreman/test/dispatch.test.ts` also runs one real worker on a throwaway repo (Haiku, under $1).
 
 ## Intake
 
