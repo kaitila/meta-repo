@@ -2,7 +2,7 @@
 // Both never overwrite a file the project has (settings.json is merged, D0014), and both
 // record what they installed in .meta-repo/installed.json so sync can update it later (D0018).
 import { install, type InstallResult } from "@meta-repo/agent-kit";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { generate, NAME } from "../../../presets/generate";
 import {
@@ -120,8 +120,13 @@ export function init(dir: string, opts: InitOptions = {}): Change[] {
   const changes = fromInstall(install(target));
 
   writeOnce(target, "AGENTS.md", ownTemplate("AGENTS.md").replaceAll("{{name}}", opts.name ?? basename(target)), changes);
-  if (!writeOnce(target, "CLAUDE.md", "@AGENTS.md\n", changes) && !readFileSync(join(target, "CLAUDE.md"), "utf8").includes("@AGENTS.md")) {
-    changes.push({ action: "skipped", path: "CLAUDE.md", note: "doesn't import AGENTS.md: add a line `@AGENTS.md`" });
+  if (!writeOnce(target, "CLAUDE.md", "@AGENTS.md\n", changes)) {
+    const claude = join(target, "CLAUDE.md");
+    const text = readFileSync(claude, "utf8");
+    if (!text.includes("@AGENTS.md")) {
+      writeFileSync(claude, `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}@AGENTS.md\n`);
+      changes.push({ action: "merged", path: "CLAUDE.md", note: "`@AGENTS.md` appended" });
+    }
   }
 
   const decisions = join(target, "docs", "decisions");
