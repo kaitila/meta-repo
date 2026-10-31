@@ -54,3 +54,65 @@ test("mergeSettings counts what it adds", () => {
   expect(mergeSettings(baseline, baseline).added).toBe(0);
   expect(mergeSettings({}, baseline).added).toBeGreaterThan(30);
 });
+
+test("a rule listed as omitted is not re-added by a second init, and init says so", () => {
+  const target = join(dir, "omit");
+  mkdirSync(join(target, ".claude"), { recursive: true });
+  install(target);
+  const file = join(target, ".claude", "settings.json");
+  // The project removes a deny rule, an ask rule and the guard hook on purpose, and records it.
+  const guard = baseline.hooks.PreToolUse[0].hooks[0].command;
+  const s = JSON.parse(readFileSync(file, "utf8"));
+  s.permissions.deny = s.permissions.deny.filter((r: string) => r !== "Bash(rm -rf *)");
+  s.permissions.ask = s.permissions.ask.filter((r: string) => r !== "Bash(ssh *)");
+  delete s.hooks;
+  writeFileSync(file, JSON.stringify(s));
+  writeFileSync(
+    join(target, ".claude", "agent-kit.json"),
+    JSON.stringify({ omit: ["Bash(rm -rf *)", "Bash(ssh *)", guard, "Bash(not-in-baseline *)"] }),
+  );
+  for (let run = 0; run < 2; run++) {
+    const r = install(target);
+    expect(r.merged).toEqual([]);
+    expect(r.kept).toContain(join(".claude", "settings.json"));
+    expect(r.omitted.sort()).toEqual(["Bash(rm -rf *)", "Bash(ssh *)", guard].sort());
+    const after = JSON.parse(readFileSync(file, "utf8"));
+    expect(after.permissions.deny).not.toContain("Bash(rm -rf *)");
+    expect(after.permissions.ask).not.toContain("Bash(ssh *)");
+    expect(after.hooks).toBeUndefined();
+    expect(after.permissions.deny).toContain("Read(**/.env)");
+  }
+  // A baseline rule removed but not listed still comes back.
+  const s2 = JSON.parse(readFileSync(file, "utf8"));
+  s2.permissions.deny = s2.permissions.deny.filter((r: string) => r !== "Read(**/.env)");
+  writeFileSync(file, JSON.stringify(s2));
+  const r = install(target);
+  expect(r.merged).toEqual([join(".claude", "settings.json")]);
+  expect(JSON.parse(readFileSync(file, "utf8")).permissions.deny).toContain("Read(**/.env)");
+});
+
+test("an omitted rule the project kept itself stays; omit applies to a fresh install too", () => {
+  const kept = mergeSettings({ permissions: { ask: ["Bash(ssh *)"] } }, baseline, ["Bash(ssh *)"]);
+  expect(kept.settings.permissions?.ask).toContain("Bash(ssh *)");
+  expect(kept.omitted).toEqual([]);
+
+  const target = join(dir, "omit-fresh");
+  mkdirSync(join(target, ".claude"), { recursive: true });
+  writeFileSync(join(target, ".claude", "agent-kit.json"), JSON.stringify({ omit: ["Bash(docker *)"] }));
+  const r = install(target);
+  expect(r.created).toContain(join(".claude", "settings.json"));
+  expect(r.omitted).toEqual(["Bash(docker *)"]);
+  const after = JSON.parse(readFileSync(join(target, ".claude", "settings.json"), "utf8"));
+  expect(after.permissions.ask).not.toContain("Bash(docker *)");
+  expect(after.permissions.ask).toContain("Bash(ssh *)");
+  expect(after.hooks).toEqual(baseline.hooks);
+});
+
+test("a malformed omit file stops init with a clear error", () => {
+  const target = join(dir, "omit-bad");
+  mkdirSync(join(target, ".claude"), { recursive: true });
+  writeFileSync(join(target, ".claude", "agent-kit.json"), "{ not json");
+  expect(() => install(target)).toThrow("agent-kit.json is not valid JSON");
+  writeFileSync(join(target, ".claude", "agent-kit.json"), JSON.stringify({ omit: "Bash(ssh *)" }));
+  expect(() => install(target)).toThrow('"omit" must be a list of strings');
+});
