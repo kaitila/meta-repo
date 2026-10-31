@@ -108,6 +108,15 @@ test("an omitted rule the project kept itself stays; omit applies to a fresh ins
   expect(after.hooks).toEqual(baseline.hooks);
 });
 
+test("omitting a whole list or every hook leaves it out, not the baseline's copy", () => {
+  const guard = baseline.hooks.PreToolUse[0].hooks[0].command;
+  const { settings, omitted } = mergeSettings({}, baseline, [...baseline.permissions.ask, guard]);
+  expect(settings.permissions?.ask).toBeUndefined();
+  expect(settings.hooks).toBeUndefined();
+  expect(settings.permissions?.deny).toEqual(baseline.permissions.deny);
+  expect(omitted).toEqual([...baseline.permissions.ask, guard]);
+});
+
 test("a malformed omit file stops init with a clear error", () => {
   const target = join(dir, "omit-bad");
   mkdirSync(join(target, ".claude"), { recursive: true });

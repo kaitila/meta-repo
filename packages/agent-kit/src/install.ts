@@ -67,6 +67,7 @@ export function mergeSettings(
     omitted.push(...missing.filter((r) => skip.has(r)));
     added += extra.length;
     if (mine.length || extra.length) perms[key] = [...mine, ...extra];
+    else if (project.permissions?.[key] === undefined) delete perms[key]; // not the baseline's list via the spread
   }
   merged.permissions = perms;
   // Hooks: add each baseline hook group whose command the project doesn't run yet.
@@ -82,6 +83,7 @@ export function mergeSettings(
     if (mineGroups.length || extra.length) hooks[event] = [...mineGroups, ...extra];
   }
   if (Object.keys(hooks).length) merged.hooks = hooks;
+  else if (project.hooks === undefined) delete merged.hooks;
   return { settings: merged, added, omitted };
 }
 
