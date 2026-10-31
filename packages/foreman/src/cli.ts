@@ -273,15 +273,18 @@ export async function main(argv: string[]): Promise<number | null> {
         ? `${sessions.map((s) => `${s.task} ${s.role}: ${s.status}${s.error ? ` (${s.error})` : ""}`).join("\n")}\n${sessions.length} sessions, $${cost.toFixed(2)}`
         : "nothing to dispatch";
       return out(sessions, text), 0;
+    }
     case "merge-queue": {
       const actor = process.env.FOREMAN_ACTOR ? me : { name: "merge-queue", kind: me.kind };
       const show = (r: QueueEntry[]) =>
         out(r, r.map((e) => `${e.id}  ${e.action.padEnd(15)} ${e.reason}`).join("\n") || "nothing approved");
       await mergeQueue(f, actor, {
+        once: o.once,
         dryRun: o["dry-run"],
         settleSeconds: num(o["settle-seconds"], 30, "--settle-seconds"),
         intervalSeconds: num(o.interval, 60, "--interval"),
         onPass: show,
+      });
       return 0;
     }
     case "janitor": {
