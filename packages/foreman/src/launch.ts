@@ -365,6 +365,7 @@ export async function launch(
     } catch (e) {
       if (!timedOut) throw e; // a stream destroyed after the timeout ends the read early
     }
+    parser.push(decoder.decode());
     const exitCode = await child.exited;
     const warnings: string[] = [];
     if (!credentialsLinkIntact(configDir)) {
